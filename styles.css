@@ -1,0 +1,563 @@
+/*
+ * My Chat for Obsidian — 宿主侧样式
+ *
+ * 原则：
+ * - 聊天区域本身由官方前端 iframe 渲染，插件不改它的 UI；
+ * - 这里只负责宿主侧的原生风格面板（会话列表 / 搜索 / 错误提示）与布局；
+ * - 颜色全部用 Obsidian CSS 变量，跟随深浅色，不引入自定义主题色。
+ */
+
+/* ---------------------------------------------------------------------------
+ * 对话视图
+ * ------------------------------------------------------------------------- */
+
+.my-chat-root {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  background: var(--background-primary, #ffffff);
+}
+
+.my-chat-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  background: var(--background-primary, #ffffff);
+}
+
+.my-chat-notice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 16px;
+  box-sizing: border-box;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--text-muted, #888888);
+  text-align: center;
+}
+
+/* 加载/状态文字（覆盖在 iframe 加载前的空区域） */
+.my-chat-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  font-size: var(--font-ui-smaller, 12px);
+  color: var(--text-muted, #888888);
+  text-align: center;
+}
+
+.my-chat-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border: 1px solid var(--background-modifier-border, #d0d0d0);
+  border-radius: var(--radius-s, 4px);
+  background: var(--interactive-normal, #f2f2f2);
+  color: var(--text-normal, #222222);
+  font-size: var(--font-ui-small, 13px);
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.my-chat-btn:hover {
+  background: var(--interactive-hover, #e8e8e8);
+}
+
+.my-chat-btn-primary {
+  border-color: var(--interactive-accent, #7c5cff);
+  background: var(--interactive-accent, #7c5cff);
+  color: var(--text-on-accent, #ffffff);
+}
+
+.my-chat-btn-primary:hover {
+  background: var(--interactive-accent-hover, #6a4ae0);
+}
+
+.my-chat-btn-small {
+  padding: 2px 8px;
+  font-size: var(--font-ui-smaller, 11px);
+}
+
+.my-chat-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-s, 4px);
+  background: transparent;
+  color: var(--text-muted, #888888);
+  cursor: pointer;
+}
+
+.my-chat-icon-btn:hover {
+  background: var(--background-modifier-hover, #f0f0f0);
+  color: var(--text-normal, #222222);
+}
+
+/* ---------------------------------------------------------------------------
+ * 错误面板（服务失败 / iframe 失败）
+ * ------------------------------------------------------------------------- */
+
+.my-chat-error-panel {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 24px 20px;
+  overflow: auto;
+  text-align: center;
+}
+
+.my-chat-error-title {
+  font-size: var(--font-ui-medium, 15px);
+  font-weight: 600;
+  color: var(--text-error, #c0392b);
+}
+
+.my-chat-error-reason {
+  max-width: 90%;
+  font-size: var(--font-ui-small, 13px);
+  line-height: 1.6;
+  color: var(--text-normal, #333333);
+}
+
+.my-chat-error-details {
+  box-sizing: border-box;
+  max-width: 100%;
+  max-height: 220px;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border-radius: var(--radius-m, 6px);
+  background: var(--background-secondary, #f5f5f5);
+  color: var(--text-muted, #777777);
+  font-family: var(--font-monospace, monospace);
+  font-size: var(--font-ui-smaller, 11px);
+  line-height: 1.5;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.my-chat-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* ---------------------------------------------------------------------------
+ * 顶部提示条（bridge 未就绪等非致命问题，不遮挡聊天）
+ * ------------------------------------------------------------------------- */
+
+.my-chat-banner {
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--background-modifier-border, #e0e0e0);
+  background: var(--background-secondary, #f7f7f7);
+  color: var(--text-muted, #777777);
+  font-size: var(--font-ui-smaller, 12px);
+  line-height: 1.5;
+}
+
+.my-chat-banner-text {
+  flex: 1 1 220px;
+}
+
+.my-chat-banner-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* ---------------------------------------------------------------------------
+ * 会话面板
+ * ------------------------------------------------------------------------- */
+
+.my-chat-sessions,
+.my-chat-search-view {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  padding: 8px 8px 0;
+  overflow: hidden;
+}
+
+.my-chat-sessions-header {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 8px;
+}
+
+.my-chat-sessions-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.my-chat-sessions-title {
+  font-size: var(--font-ui-medium, 14px);
+  font-weight: 600;
+  color: var(--text-normal, #222222);
+}
+
+.my-chat-search-wrap {
+  position: relative;
+  display: flex;
+}
+
+.my-chat-search-input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--background-modifier-border, #d0d0d0);
+  border-radius: var(--radius-s, 4px);
+  background: var(--background-modifier-form-field, #ffffff);
+  color: var(--text-normal, #222222);
+  font-size: var(--font-ui-small, 13px);
+  line-height: 20px;
+}
+
+.my-chat-search-input:focus {
+  border-color: var(--interactive-accent, #7c5cff);
+  outline: none;
+}
+
+.my-chat-sessions-status,
+.my-chat-search-status {
+  display: none;
+  flex: 0 0 auto;
+  padding: 4px 2px;
+  color: var(--text-muted, #888888);
+  font-size: var(--font-ui-smaller, 11px);
+}
+
+.my-chat-sessions-status.is-visible,
+.my-chat-search-status.is-visible {
+  display: block;
+}
+
+.my-chat-sessions-list,
+.my-chat-search-section {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 12px;
+}
+
+.my-chat-group-title {
+  padding: 8px 2px 4px;
+  color: var(--text-faint, #999999);
+  font-size: var(--font-ui-smaller, 11px);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* 可折叠的分组标题（P7） */
+.my-chat-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 4px;
+  border-radius: var(--radius-s, 4px);
+  cursor: pointer;
+  user-select: none;
+}
+
+.my-chat-group-toggle:hover,
+.my-chat-group-toggle:focus-visible {
+  background: var(--background-modifier-hover, #f0f0f0);
+  outline: none;
+}
+
+.my-chat-group-arrow {
+  width: 12px;
+  flex: 0 0 12px;
+  color: var(--text-muted, #888888);
+  font-size: 10px;
+  text-align: center;
+}
+
+.my-chat-group-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.my-chat-group-count {
+  flex: 0 0 auto;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--background-modifier-border, #e0e0e0);
+  color: var(--text-muted, #888888);
+  font-size: 10px;
+  font-weight: 500;
+  text-align: center;
+}
+
+.my-chat-session-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: var(--radius-s, 4px);
+  cursor: pointer;
+}
+
+.my-chat-session-row:hover,
+.my-chat-session-row:focus-visible {
+  background: var(--background-modifier-hover, #f0f0f0);
+  outline: none;
+}
+
+.my-chat-session-title {
+  overflow: hidden;
+  color: var(--text-normal, #222222);
+  font-size: var(--font-ui-small, 13px);
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.my-chat-session-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--text-muted, #888888);
+  font-size: var(--font-ui-smaller, 11px);
+}
+
+.my-chat-session-snippet {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-muted, #777777);
+  font-size: var(--font-ui-smaller, 12px);
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* ---------------------------------------------------------------------------
+ * 提示块（空状态 / 桥接未就绪 / 错误）
+ * ------------------------------------------------------------------------- */
+
+.my-chat-hint {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 12px;
+  border: 1px dashed var(--background-modifier-border, #d0d0d0);
+  border-radius: var(--radius-m, 6px);
+  background: var(--background-secondary, #f7f7f7);
+  color: var(--text-muted, #777777);
+  font-size: var(--font-ui-small, 12px);
+  line-height: 1.6;
+}
+
+.my-chat-hint-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ---------------------------------------------------------------------------
+ * 搜索视图
+ * ------------------------------------------------------------------------- */
+
+.my-chat-search-section {
+  flex: 0 1 auto;
+  overflow: visible;
+}
+
+.my-chat-search-section + .my-chat-search-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--background-modifier-border, #e0e0e0);
+}
+
+.my-chat-search-section-title {
+  padding: 2px 2px 4px;
+  color: var(--text-muted, #888888);
+  font-size: var(--font-ui-smaller, 11px);
+  font-weight: 600;
+}
+
+.my-chat-search-empty {
+  padding: 2px 8px 8px;
+  color: var(--text-faint, #999999);
+  font-size: var(--font-ui-smaller, 12px);
+}
+
+.my-chat-search-loading {
+  padding: 2px 8px;
+  color: var(--text-faint, #999999);
+  font-size: var(--font-ui-smaller, 12px);
+}
+
+.my-chat-result-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: var(--radius-s, 4px);
+  cursor: pointer;
+}
+
+.my-chat-result-row:hover,
+.my-chat-result-row:focus-visible {
+  background: var(--background-modifier-hover, #f0f0f0);
+  outline: none;
+}
+
+.my-chat-result-title {
+  overflow: hidden;
+  color: var(--text-normal, #222222);
+  font-size: var(--font-ui-small, 13px);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.my-chat-result-snippet {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-muted, #777777);
+  font-size: var(--font-ui-smaller, 12px);
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.my-chat-result-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--text-faint, #999999);
+  font-size: var(--font-ui-smaller, 11px);
+}
+
+/* ---------------------------------------------------------------------------
+ * 专注模式：隐藏 ribbon（左右侧栏用原生 collapse），对话占满主区域
+ * ------------------------------------------------------------------------- */
+
+body.my-chat-focus-mode .workspace-ribbon {
+  display: none;
+}
+
+/* ---------------------------------------------------------------------------
+ * 设置页
+ * ------------------------------------------------------------------------- */
+
+.my-chat-settings .my-chat-settings-hash {
+  font-family: var(--font-monospace, monospace);
+  font-size: var(--font-ui-smaller, 12px);
+  color: var(--text-muted, #888888);
+}
+
+.my-chat-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* 旁路智能体确认弹窗里的 diff 代码块 */
+.my-chat-agent-diff {
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: var(--radius-m, 6px);
+  background: var(--background-secondary, #f5f5f5);
+  font-family: var(--font-monospace, monospace);
+  font-size: var(--font-ui-smaller, 11px);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* P6：设定冲突提示条 / 设定卡向导 / 新实体弹窗 */
+.my-chat-p6-banner {
+  align-items: flex-start;
+}
+
+.my-chat-p6-banner-text {
+  flex: 1 1 220px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.my-chat-p6-wizard-files {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 46vh;
+  overflow: auto;
+  margin-top: 8px;
+}
+
+.my-chat-p6-file-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.my-chat-p6-file-title {
+  color: var(--text-muted, #888888);
+  font-size: var(--font-ui-smaller, 12px);
+  font-weight: 600;
+}
+
+.my-chat-p6-file-list,
+.my-chat-p6-entity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 200px;
+  overflow: auto;
+  padding: 4px 6px;
+  border: 1px solid var(--background-modifier-border, #e0e0e0);
+  border-radius: var(--radius-s, 4px);
+}
+
+.my-chat-p6-file-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-ui-small, 13px);
+  line-height: 1.5;
+}

@@ -361,6 +361,7 @@ __export(main_exports, {
   buildBootstrapScript: () => buildBootstrapScript,
   buildRuntimeSingleHtml: () => buildRuntimeSingleHtml,
   bytesToBase64: () => bytesToBase64,
+  computeEffectiveInset: () => computeEffectiveInset,
   computeKeyboardInset: () => computeKeyboardInset,
   createAgentBridgeClient: () => createAgentBridgeClient,
   createAgentRuntime: () => createAgentRuntime,
@@ -6759,7 +6760,9 @@ var DEFAULT_SETTINGS = {
   autoBackupEnabled: true,
   backupFolder: "My Chat \u5907\u4EFD",
   sessionsPanelEverOpened: false,
-  collapsedGroups: []
+  collapsedGroups: [],
+  keyboardInsetMode: "auto",
+  keyboardInsetPx: 0
 };
 var AGENT_MODEL_OPTIONS = ["deepseek-chat", "deepseek-reasoner"];
 var DEFAULT_AGENT_MODEL = "deepseek-chat";
@@ -6789,7 +6792,9 @@ function normalizeSettings(raw) {
     autoBackupEnabled: typeof source.autoBackupEnabled === "boolean" ? source.autoBackupEnabled : DEFAULT_SETTINGS.autoBackupEnabled,
     backupFolder: typeof source.backupFolder === "string" && source.backupFolder.trim().length > 0 ? source.backupFolder.trim() : DEFAULT_SETTINGS.backupFolder,
     sessionsPanelEverOpened: typeof source.sessionsPanelEverOpened === "boolean" ? source.sessionsPanelEverOpened : DEFAULT_SETTINGS.sessionsPanelEverOpened,
-    collapsedGroups
+    collapsedGroups,
+    keyboardInsetMode: source.keyboardInsetMode === "off" ? "off" : "auto",
+    keyboardInsetPx: typeof source.keyboardInsetPx === "number" && Number.isFinite(source.keyboardInsetPx) ? Math.max(0, Math.min(600, Math.round(source.keyboardInsetPx))) : 0
   };
 }
 function resolveLocaleInjection(choice) {
@@ -7009,6 +7014,21 @@ var MyChatSettingTab = class extends import_obsidian8.PluginSettingTab {
         void this.host.updateSettings({ focusModeOnOpen: value });
       });
     });
+    new import_obsidian8.Setting(parent).setName("\u8F6F\u952E\u76D8\u907F\u8BA9").setDesc(
+      "iPad/\u624B\u673A\u4E0A\u5F39\u952E\u76D8\u65F6\u6536\u7F29\u5BF9\u8BDD\u533A\u57DF\uFF0C\u907F\u514D\u8F93\u5165\u6846\u88AB\u952E\u76D8\u76D6\u4F4F\u3002\u81EA\u52A8\u6D4B\u91CF\u4E0D\u51C6\u65F6\uFF1A\u5148\u8BD5\u300C\u624B\u52A8\u300D\u5E76\u586B\u952E\u76D8\u9AD8\u5EA6\uFF08\u5E38\u89C1 300\u2013420\uFF09\u3002"
+    ).addDropdown((dropdown) => {
+      dropdown.addOption("auto", "\u81EA\u52A8\u6D4B\u91CF").addOption("off", "\u4E0D\u907F\u8BA9").setValue(this.host.settings.keyboardInsetMode).onChange(async (value) => {
+        await this.host.updateSettings({ keyboardInsetMode: value });
+        this.host.reloadChat();
+      });
+    }).addText((text) => {
+      text.setPlaceholder("\u624B\u52A8\u9AD8\u5EA6\uFF0C\u5982 380\uFF080=\u81EA\u52A8\uFF09").setValue(this.host.settings.keyboardInsetPx > 0 ? String(this.host.settings.keyboardInsetPx) : "").onChange(async (value) => {
+        const parsed = Number.parseInt(value.trim(), 10);
+        const px = Number.isFinite(parsed) ? Math.max(0, Math.min(600, parsed)) : 0;
+        await this.host.updateSettings({ keyboardInsetPx: px });
+        this.host.reloadChat();
+      });
+    });
   }
   /** 数据：导出 / 导入 / 重载 */
   renderDataSection(parent) {
@@ -7155,6 +7175,13 @@ var ThemeController = class {
 // src/views/chat-view.ts
 var import_obsidian9 = require("obsidian");
 var VIEW_TYPE_CHAT = "my-chat-view";
+function computeEffectiveInset(keyboardInset, layoutShrink) {
+  const kb = Number.isFinite(keyboardInset) ? Math.max(0, Math.round(keyboardInset)) : 0;
+  const shrink = Number.isFinite(layoutShrink) ? Math.max(0, Math.round(layoutShrink)) : 0;
+  if (kb === 0) return 0;
+  if (shrink >= kb * 0.9) return 0;
+  return Math.max(0, kb - shrink);
+}
 var KEYBOARD_MAX = 480;
 var KEYBOARD_MIN = 60;
 function computeKeyboardInset(input) {
@@ -7398,6 +7425,14 @@ ${error.toDiagnostic()}`;
     let rafId = 0;
     let stableFrames = 0;
     let lastApplied = -1;
+    let baselineInner = window.innerHeight;
+    let baselinePane = this.contentEl.clientHeight || window.innerHeight;
+    const measureLayoutShrink = () => {
+      const pane = this.contentEl.clientHeight || window.innerHeight;
+      const innerShrink = baselineInner - window.innerHeight;
+      const paneShrink = baselinePane - pane;
+      return Math.max(0, innerShrink, paneShrink);
+    };
     const measure = () => {
       const viewport2 = window.visualViewport;
       return computeKeyboardInset({
@@ -7412,17 +7447,24 @@ ${error.toDiagnostic()}`;
       const frame = this.frame;
       if (!frame) return;
       const kb = measure();
-      frame.style.height = kb > KEYBOARD_MIN ? `calc(100% - ${kb}px)` : "100%";
-      lastApplied = kb;
+      const shrink = measureLayoutShrink();
+      const preference = this.host.getKeyboardInset();
+      const inset = preference.px > 0 ? preference.px : preference.mode === "off" ? 0 : computeEffectiveInset(kb, shrink);
+      frame.style.height = inset > KEYBOARD_MIN ? `calc(100% - ${inset}px)` : "100%";
+      lastApplied = inset;
+      if (kb === 0 && inset === 0) {
+        baselineInner = window.innerHeight;
+        baselinePane = this.contentEl.clientHeight || window.innerHeight;
+      }
     };
     const watch = () => {
       cancelAnimationFrame(rafId);
       stableFrames = 0;
       let remaining = 40;
       const tick = () => {
+        const before = lastApplied;
         apply();
-        const next = measure();
-        if (next === lastApplied) stableFrames += 1;
+        if (lastApplied === before && lastApplied >= 0) stableFrames += 1;
         else stableFrames = 0;
         remaining -= 1;
         if (stableFrames >= 3 || remaining <= 0) return;
@@ -8989,6 +9031,13 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
   // ---------------------------------------------------------------------------
   // 诊断
   // ---------------------------------------------------------------------------
+  getKeyboardInset() {
+    var _a, _b;
+    return {
+      mode: (_a = this.settings.keyboardInsetMode) != null ? _a : "auto",
+      px: (_b = this.settings.keyboardInsetPx) != null ? _b : 0
+    };
+  }
   getDiagnostics(extraError) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
     const appVersion = (_a = this.app.appVersion) != null ? _a : "\u672A\u77E5";
@@ -9085,6 +9134,7 @@ var ImportHistoryModal = class extends import_obsidian12.Modal {
   buildBootstrapScript,
   buildRuntimeSingleHtml,
   bytesToBase64,
+  computeEffectiveInset,
   computeKeyboardInset,
   createAgentBridgeClient,
   createAgentRuntime,

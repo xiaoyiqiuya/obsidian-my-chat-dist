@@ -7192,7 +7192,7 @@ function computeEffectiveInset(keyboardInset, layoutShrink) {
 function estimateKeyboardInset(innerHeight, paneHeight) {
   const basis = Number.isFinite(innerHeight) && innerHeight > 0 ? innerHeight : paneHeight;
   if (!Number.isFinite(basis) || basis <= 0) return 0;
-  const estimate = Math.max(280, Math.min(560, Math.round(basis * 0.44)));
+  const estimate = Math.max(260, Math.min(520, Math.round(basis * 0.35)));
   if (Number.isFinite(paneHeight) && paneHeight > 0) {
     return Math.min(estimate, Math.max(0, Math.round(paneHeight - 240)));
   }

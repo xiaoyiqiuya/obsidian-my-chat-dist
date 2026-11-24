@@ -377,6 +377,7 @@ __export(main_exports, {
   evaluateStorageHealth: () => evaluateStorageHealth,
   extractEntityNames: () => extractEntityNames,
   extractMainAssetPaths: () => extractMainAssetPaths,
+  getKeyboardSamples: () => getKeyboardSamples,
   groupSessions: () => groupSessions,
   injectBootstrapConfig: () => injectBootstrapConfig,
   isBackupFileName: () => isBackupFileName,
@@ -7028,6 +7029,11 @@ var MyChatSettingTab = class extends import_obsidian8.PluginSettingTab {
         await this.host.updateSettings({ keyboardInsetPx: px });
         this.host.reloadChat();
       });
+    }).addButton((button) => {
+      button.setButtonText("\u590D\u5236\u952E\u76D8\u8BCA\u65AD").onClick(async () => {
+        const ok = await copyText(this.host.getDiagnostics());
+        new import_obsidian8.Notice(ok ? "\u952E\u76D8\u8BCA\u65AD\u5DF2\u590D\u5236\uFF08\u542B\u6700\u8FD1\u91C7\u6837\uFF09" : "\u590D\u5236\u5931\u8D25");
+      });
     });
   }
   /** 数据：导出 / 导入 / 重载 */
@@ -7196,6 +7202,19 @@ function readCssKeyboardHeight() {
   const raw = getComputedStyle(document.documentElement).getPropertyValue("--keyboard-height");
   const value = Number.parseFloat(raw);
   return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+var keyboardSamples = [];
+function recordKeyboardSample(sample) {
+  keyboardSamples.push(sample);
+  if (keyboardSamples.length > 40) keyboardSamples.shift();
+}
+function getKeyboardSamples() {
+  if (keyboardSamples.length === 0) return "\uFF08\u6682\u65E0\u952E\u76D8\u91C7\u6837\uFF1A\u5C1A\u672A\u805A\u7126\u8FC7\u8F93\u5165\u6846\uFF09";
+  const header = "inner	pane	vvH	cssKb	cap	kb	shrink	inset";
+  const rows = keyboardSamples.map(
+    (s) => `${s.inner}	${s.pane}	${s.vvHeight}	${s.cssKb}	${s.capacitor}	${s.kb}	${s.shrink}	${s.inset}`
+  );
+  return [header, ...rows].join("\n");
 }
 var IFRAME_LOAD_TIMEOUT_MS = 15e3;
 var MyChatView = class extends import_obsidian9.ItemView {
@@ -7422,17 +7441,9 @@ ${error.toDiagnostic()}`;
     this.detachKeyboardInset();
     if (typeof window === "undefined") return;
     let capacitorHeight = 0;
-    let rafId = 0;
-    let stableFrames = 0;
-    let lastApplied = -1;
     let baselineInner = window.innerHeight;
     let baselinePane = this.contentEl.clientHeight || window.innerHeight;
-    const measureLayoutShrink = () => {
-      const pane = this.contentEl.clientHeight || window.innerHeight;
-      const innerShrink = baselineInner - window.innerHeight;
-      const paneShrink = baselinePane - pane;
-      return Math.max(0, innerShrink, paneShrink);
-    };
+    const timers = /* @__PURE__ */ new Set();
     const measure = () => {
       const viewport2 = window.visualViewport;
       return computeKeyboardInset({
@@ -7443,45 +7454,54 @@ ${error.toDiagnostic()}`;
         capacitorHeight
       });
     };
+    const measureLayoutShrink = (paneHeight) => {
+      const innerShrink = baselineInner - window.innerHeight;
+      const paneShrink = baselinePane - paneHeight;
+      return Math.max(0, innerShrink, paneShrink);
+    };
     const apply = () => {
       const frame = this.frame;
       if (!frame) return;
+      const paneHeight = this.contentEl.clientHeight || window.innerHeight;
       const kb = measure();
-      const shrink = measureLayoutShrink();
+      const shrink = measureLayoutShrink(paneHeight);
       const preference = this.host.getKeyboardInset();
-      const inset = preference.px > 0 ? preference.px : preference.mode === "off" ? 0 : computeEffectiveInset(kb, shrink);
+      let inset = preference.px > 0 ? preference.px : preference.mode === "off" ? 0 : computeEffectiveInset(kb, shrink);
+      inset = Math.min(inset, Math.round(paneHeight * 0.55));
       frame.style.height = inset > KEYBOARD_MIN ? `calc(100% - ${inset}px)` : "100%";
-      lastApplied = inset;
+      recordKeyboardSample({
+        inner: window.innerHeight,
+        pane: paneHeight,
+        vvHeight: window.visualViewport ? Math.round(window.visualViewport.height) : -1,
+        cssKb: Math.round(readCssKeyboardHeight()),
+        capacitor: Math.round(capacitorHeight),
+        kb: Math.round(kb),
+        shrink: Math.round(shrink),
+        inset: Math.round(inset)
+      });
       if (kb === 0 && inset === 0) {
         baselineInner = window.innerHeight;
-        baselinePane = this.contentEl.clientHeight || window.innerHeight;
+        baselinePane = paneHeight;
       }
     };
-    const watch = () => {
-      cancelAnimationFrame(rafId);
-      stableFrames = 0;
-      let remaining = 40;
-      const tick = () => {
-        const before = lastApplied;
-        apply();
-        if (lastApplied === before && lastApplied >= 0) stableFrames += 1;
-        else stableFrames = 0;
-        remaining -= 1;
-        if (stableFrames >= 3 || remaining <= 0) return;
-        rafId = requestAnimationFrame(tick);
-      };
-      rafId = requestAnimationFrame(tick);
+    const schedule = () => {
+      for (const delay of [60, 200, 500, 1e3, 1600]) {
+        const id = window.setTimeout(() => {
+          timers.delete(id);
+          apply();
+        }, delay);
+        timers.add(id);
+      }
     };
     const viewport = window.visualViewport;
-    const onResize = () => watch();
+    const onResize = () => schedule();
     viewport == null ? void 0 : viewport.addEventListener("resize", onResize);
     viewport == null ? void 0 : viewport.addEventListener("scroll", onResize);
     window.addEventListener("resize", onResize);
     window.addEventListener("orientationchange", onResize);
-    const root = document.documentElement;
-    const observer = new MutationObserver(() => watch());
-    observer.observe(root, { attributes: true, attributeFilter: ["style", "class"] });
-    const onFocus = () => watch();
+    const observer = new MutationObserver(() => schedule());
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "class"] });
+    const onFocus = () => schedule();
     window.addEventListener("focusin", onFocus);
     window.addEventListener("focusout", onFocus);
     const capacitor = window.Capacitor;
@@ -7493,19 +7513,20 @@ ${error.toDiagnostic()}`;
           keyboardPlugin.addListener(event, (info) => {
             var _a2;
             capacitorHeight = event.includes("Show") ? (_a2 = info == null ? void 0 : info.keyboardHeight) != null ? _a2 : 0 : 0;
-            watch();
+            schedule();
           })
         );
       }
     }
     const offBridgeEvent = this.host.bridge.onEvent((event) => {
-      if (event === "inputFocus") watch();
+      if (event === "inputFocus") schedule();
     });
-    watch();
+    schedule();
     this.viewportHandler = () => {
       var _a2;
       offBridgeEvent();
-      cancelAnimationFrame(rafId);
+      for (const id of timers) window.clearTimeout(id);
+      timers.clear();
       viewport == null ? void 0 : viewport.removeEventListener("resize", onResize);
       viewport == null ? void 0 : viewport.removeEventListener("scroll", onResize);
       window.removeEventListener("resize", onResize);
@@ -8123,7 +8144,7 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
     this.registerView(VIEW_TYPE_SESSIONS, (leaf) => new SessionsView(leaf, this));
     this.registerView(VIEW_TYPE_SEARCH, (leaf) => new SearchView(leaf, this));
     this.addRibbonIcon("message-square", "My Chat", () => {
-      void this.activateChatView({ openSessionsPanel: !this.settings.sessionsPanelEverOpened });
+      void this.activateChatView({ openSessionsPanel: false });
     });
     this.addCommand({
       id: "open-chat",
@@ -9039,6 +9060,9 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
     };
   }
   getDiagnostics(extraError) {
+    return this.buildDiagnosticsBase(extraError) + "\n\n\u952E\u76D8\u907F\u8BA9\u91C7\u6837\uFF1A\n" + getKeyboardSamples();
+  }
+  buildDiagnosticsBase(extraError) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
     const appVersion = (_a = this.app.appVersion) != null ? _a : "\u672A\u77E5";
     return buildDiagnostics({
@@ -9149,6 +9173,7 @@ var ImportHistoryModal = class extends import_obsidian12.Modal {
   evaluateStorageHealth,
   extractEntityNames,
   extractMainAssetPaths,
+  getKeyboardSamples,
   groupSessions,
   injectBootstrapConfig,
   isBackupFileName,

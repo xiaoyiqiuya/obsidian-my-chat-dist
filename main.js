@@ -374,6 +374,7 @@ __export(main_exports, {
   default: () => MyChatPlugin,
   defaultExportFileName: () => defaultExportFileName,
   detectNewEntities: () => detectNewEntities,
+  estimateKeyboardInset: () => estimateKeyboardInset,
   evaluateStorageHealth: () => evaluateStorageHealth,
   extractEntityNames: () => extractEntityNames,
   extractMainAssetPaths: () => extractMainAssetPaths,
@@ -6762,7 +6763,7 @@ var DEFAULT_SETTINGS = {
   backupFolder: "My Chat \u5907\u4EFD",
   sessionsPanelEverOpened: false,
   collapsedGroups: [],
-  keyboardInsetMode: "auto",
+  keyboardInsetMode: "estimate",
   keyboardInsetPx: 0
 };
 var AGENT_MODEL_OPTIONS = ["deepseek-chat", "deepseek-reasoner"];
@@ -6794,7 +6795,7 @@ function normalizeSettings(raw) {
     backupFolder: typeof source.backupFolder === "string" && source.backupFolder.trim().length > 0 ? source.backupFolder.trim() : DEFAULT_SETTINGS.backupFolder,
     sessionsPanelEverOpened: typeof source.sessionsPanelEverOpened === "boolean" ? source.sessionsPanelEverOpened : DEFAULT_SETTINGS.sessionsPanelEverOpened,
     collapsedGroups,
-    keyboardInsetMode: source.keyboardInsetMode === "off" ? "off" : "auto",
+    keyboardInsetMode: source.keyboardInsetMode === "off" ? "off" : source.keyboardInsetMode === "auto" ? "auto" : "estimate",
     keyboardInsetPx: typeof source.keyboardInsetPx === "number" && Number.isFinite(source.keyboardInsetPx) ? Math.max(0, Math.min(600, Math.round(source.keyboardInsetPx))) : 0
   };
 }
@@ -7018,7 +7019,7 @@ var MyChatSettingTab = class extends import_obsidian8.PluginSettingTab {
     new import_obsidian8.Setting(parent).setName("\u8F6F\u952E\u76D8\u907F\u8BA9").setDesc(
       "iPad/\u624B\u673A\u4E0A\u5F39\u952E\u76D8\u65F6\u6536\u7F29\u5BF9\u8BDD\u533A\u57DF\uFF0C\u907F\u514D\u8F93\u5165\u6846\u88AB\u952E\u76D8\u76D6\u4F4F\u3002\u81EA\u52A8\u6D4B\u91CF\u4E0D\u51C6\u65F6\uFF1A\u5148\u8BD5\u300C\u624B\u52A8\u300D\u5E76\u586B\u952E\u76D8\u9AD8\u5EA6\uFF08\u5E38\u89C1 300\u2013420\uFF09\u3002"
     ).addDropdown((dropdown) => {
-      dropdown.addOption("auto", "\u81EA\u52A8\u6D4B\u91CF").addOption("off", "\u4E0D\u907F\u8BA9").setValue(this.host.settings.keyboardInsetMode).onChange(async (value) => {
+      dropdown.addOption("estimate", "\u81EA\u52A8\u4F30\u7B97\uFF08iPad \u63A8\u8350\uFF09").addOption("auto", "\u53EF\u89C6\u89C6\u53E3\u6D4B\u91CF\uFF08\u65E7\u903B\u8F91\uFF09").addOption("off", "\u4E0D\u907F\u8BA9").setValue(this.host.settings.keyboardInsetMode).onChange(async (value) => {
         await this.host.updateSettings({ keyboardInsetMode: value });
         this.host.reloadChat();
       });
@@ -7187,6 +7188,15 @@ function computeEffectiveInset(keyboardInset, layoutShrink) {
   if (kb === 0) return 0;
   if (shrink >= kb * 0.9) return 0;
   return Math.max(0, kb - shrink);
+}
+function estimateKeyboardInset(innerHeight, paneHeight) {
+  const basis = Number.isFinite(innerHeight) && innerHeight > 0 ? innerHeight : paneHeight;
+  if (!Number.isFinite(basis) || basis <= 0) return 0;
+  const estimate = Math.max(280, Math.min(560, Math.round(basis * 0.44)));
+  if (Number.isFinite(paneHeight) && paneHeight > 0) {
+    return Math.min(estimate, Math.max(0, Math.round(paneHeight - 240)));
+  }
+  return estimate;
 }
 var KEYBOARD_MAX = 480;
 var KEYBOARD_MIN = 60;
@@ -7459,6 +7469,8 @@ ${error.toDiagnostic()}`;
       const paneShrink = baselinePane - paneHeight;
       return Math.max(0, innerShrink, paneShrink);
     };
+    let inputFocused = false;
+    let blurTimer = 0;
     const apply = () => {
       const frame = this.frame;
       if (!frame) return;
@@ -7466,7 +7478,7 @@ ${error.toDiagnostic()}`;
       const kb = measure();
       const shrink = measureLayoutShrink(paneHeight);
       const preference = this.host.getKeyboardInset();
-      let inset = preference.px > 0 ? preference.px : preference.mode === "off" ? 0 : computeEffectiveInset(kb, shrink);
+      let inset = preference.px > 0 ? preference.px : preference.mode === "off" ? 0 : preference.mode === "estimate" ? inputFocused ? estimateKeyboardInset(window.innerHeight, paneHeight) : 0 : computeEffectiveInset(kb, shrink);
       inset = Math.min(inset, Math.round(paneHeight * 0.55));
       frame.style.height = inset > KEYBOARD_MIN ? `calc(100% - ${inset}px)` : "100%";
       recordKeyboardSample({
@@ -7518,13 +7530,25 @@ ${error.toDiagnostic()}`;
         );
       }
     }
-    const offBridgeEvent = this.host.bridge.onEvent((event) => {
-      if (event === "inputFocus") schedule();
+    const offBridgeEvent = this.host.bridge.onEvent((event, payload) => {
+      if (event !== "inputFocus") return;
+      const focused = Boolean(payload == null ? void 0 : payload.focused);
+      window.clearTimeout(blurTimer);
+      if (focused) {
+        inputFocused = true;
+        schedule();
+      } else {
+        blurTimer = window.setTimeout(() => {
+          inputFocused = false;
+          schedule();
+        }, 250);
+      }
     });
     schedule();
     this.viewportHandler = () => {
       var _a2;
       offBridgeEvent();
+      window.clearTimeout(blurTimer);
       for (const id of timers) window.clearTimeout(id);
       timers.clear();
       viewport == null ? void 0 : viewport.removeEventListener("resize", onResize);
@@ -9055,7 +9079,7 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
   getKeyboardInset() {
     var _a, _b;
     return {
-      mode: (_a = this.settings.keyboardInsetMode) != null ? _a : "auto",
+      mode: (_a = this.settings.keyboardInsetMode) != null ? _a : "estimate",
       px: (_b = this.settings.keyboardInsetPx) != null ? _b : 0
     };
   }
@@ -9170,6 +9194,7 @@ var ImportHistoryModal = class extends import_obsidian12.Modal {
   decompressGzipBase64,
   defaultExportFileName,
   detectNewEntities,
+  estimateKeyboardInset,
   evaluateStorageHealth,
   extractEntityNames,
   extractMainAssetPaths,

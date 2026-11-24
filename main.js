@@ -7245,7 +7245,10 @@ function computeKeyboardPlan(input) {
   } else if (preference.mode === "off") {
     inset = 0;
   } else if (preference.mode === "estimate") {
-    inset = focused ? estimateKeyboardInset(input.innerHeight, paneHeight) : 0;
+    const estimate = estimateKeyboardInset(input.innerHeight, paneHeight);
+    const paneShrink = Math.max(0, input.innerHeight - paneHeight);
+    const systemHandled = estimate > 0 && paneShrink >= estimate * 0.8;
+    inset = focused && !systemHandled ? estimate : 0;
     shrinkFrame = true;
     notifyFrame = inset;
   } else {

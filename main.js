@@ -363,6 +363,7 @@ __export(main_exports, {
   bytesToBase64: () => bytesToBase64,
   computeEffectiveInset: () => computeEffectiveInset,
   computeKeyboardInset: () => computeKeyboardInset,
+  computeKeyboardPlan: () => computeKeyboardPlan,
   createAgentBridgeClient: () => createAgentBridgeClient,
   createAgentRuntime: () => createAgentRuntime,
   createHtmlBlobUrl: () => createHtmlBlobUrl,
@@ -6762,6 +6763,7 @@ var DEFAULT_SETTINGS = {
   autoBackupEnabled: true,
   backupFolder: "My Chat \u5907\u4EFD",
   sessionsPanelEverOpened: false,
+  openSessionsOnStart: false,
   collapsedGroups: [],
   keyboardInsetMode: "estimate",
   keyboardInsetPx: 0
@@ -6794,6 +6796,7 @@ function normalizeSettings(raw) {
     autoBackupEnabled: typeof source.autoBackupEnabled === "boolean" ? source.autoBackupEnabled : DEFAULT_SETTINGS.autoBackupEnabled,
     backupFolder: typeof source.backupFolder === "string" && source.backupFolder.trim().length > 0 ? source.backupFolder.trim() : DEFAULT_SETTINGS.backupFolder,
     sessionsPanelEverOpened: typeof source.sessionsPanelEverOpened === "boolean" ? source.sessionsPanelEverOpened : DEFAULT_SETTINGS.sessionsPanelEverOpened,
+    openSessionsOnStart: typeof source.openSessionsOnStart === "boolean" ? source.openSessionsOnStart : DEFAULT_SETTINGS.openSessionsOnStart,
     collapsedGroups,
     keyboardInsetMode: source.keyboardInsetMode === "off" ? "off" : source.keyboardInsetMode === "auto" ? "auto" : "estimate",
     keyboardInsetPx: typeof source.keyboardInsetPx === "number" && Number.isFinite(source.keyboardInsetPx) ? Math.max(0, Math.min(600, Math.round(source.keyboardInsetPx))) : 0
@@ -7016,6 +7019,13 @@ var MyChatSettingTab = class extends import_obsidian8.PluginSettingTab {
         void this.host.updateSettings({ focusModeOnOpen: value });
       });
     });
+    new import_obsidian8.Setting(parent).setName("\u81EA\u52A8\u5C55\u5F00\u4F1A\u8BDD\u9762\u677F").setDesc(
+      "\u6253\u5F00\u5BF9\u8BDD\u65F6\u5728\u5DE6\u4FA7\u81EA\u52A8\u6253\u5F00\u63D2\u4EF6\u81EA\u5E26\u7684\u4F1A\u8BDD\u9762\u677F\uFF08\u542B\u5168\u6587\u641C\u7D22\uFF09\u3002\u9ED8\u8BA4\u5173\u95ED\uFF0C\u56E0\u4E3A\u5B98\u65B9\u4FA7\u680F\u5DF2\u6709\u4F1A\u8BDD\u5217\u8868\uFF0C\u540C\u65F6\u51FA\u73B0\u4F1A\u91CD\u590D\u3002"
+    ).addToggle((toggle) => {
+      toggle.setValue(this.host.settings.openSessionsOnStart).onChange(async (value) => {
+        await this.host.updateSettings({ openSessionsOnStart: value });
+      });
+    });
     new import_obsidian8.Setting(parent).setName("\u8F6F\u952E\u76D8\u907F\u8BA9").setDesc(
       "iPad/\u624B\u673A\u4E0A\u5F39\u952E\u76D8\u65F6\u6536\u7F29\u5BF9\u8BDD\u533A\u57DF\uFF0C\u907F\u514D\u8F93\u5165\u6846\u88AB\u952E\u76D8\u76D6\u4F4F\u3002\u81EA\u52A8\u6D4B\u91CF\u4E0D\u51C6\u65F6\uFF1A\u5148\u8BD5\u300C\u624B\u52A8\u300D\u5E76\u586B\u952E\u76D8\u9AD8\u5EA6\uFF08\u5E38\u89C1 300\u2013420\uFF09\u3002"
     ).addDropdown((dropdown) => {
@@ -7181,7 +7191,11 @@ var ThemeController = class {
 
 // src/views/chat-view.ts
 var import_obsidian9 = require("obsidian");
-var VIEW_TYPE_CHAT = "my-chat-view";
+
+// src/views/keyboard-inset.ts
+var KEYBOARD_MAX = 520;
+var KEYBOARD_MIN = 60;
+var KEYBOARD_MAX_SHRINK_RATIO = 0.55;
 function computeEffectiveInset(keyboardInset, layoutShrink) {
   const kb = Number.isFinite(keyboardInset) ? Math.max(0, Math.round(keyboardInset)) : 0;
   const shrink = Number.isFinite(layoutShrink) ? Math.max(0, Math.round(layoutShrink)) : 0;
@@ -7192,14 +7206,12 @@ function computeEffectiveInset(keyboardInset, layoutShrink) {
 function estimateKeyboardInset(innerHeight, paneHeight) {
   const basis = Number.isFinite(innerHeight) && innerHeight > 0 ? innerHeight : paneHeight;
   if (!Number.isFinite(basis) || basis <= 0) return 0;
-  const estimate = Math.max(260, Math.min(520, Math.round(basis * 0.35)));
+  const estimate = Math.max(260, Math.min(KEYBOARD_MAX, Math.round(basis * 0.35)));
   if (Number.isFinite(paneHeight) && paneHeight > 0) {
     return Math.min(estimate, Math.max(0, Math.round(paneHeight - 240)));
   }
   return estimate;
 }
-var KEYBOARD_MAX = 480;
-var KEYBOARD_MIN = 60;
 function computeKeyboardInset(input) {
   var _a, _b;
   const fromVisual = Math.round(input.innerHeight - input.visualHeight - input.visualOffsetTop);
@@ -7213,6 +7225,45 @@ function readCssKeyboardHeight() {
   const value = Number.parseFloat(raw);
   return Number.isFinite(value) ? Math.max(0, value) : 0;
 }
+function computeKeyboardPlan(input) {
+  const { preference, focused } = input;
+  const paneHeight = Number.isFinite(input.paneHeight) ? Math.max(0, input.paneHeight) : 0;
+  const kb = computeKeyboardInset({
+    innerHeight: input.innerHeight,
+    visualHeight: input.visualHeight,
+    visualOffsetTop: input.visualOffsetTop,
+    cssKeyboardHeight: input.cssKeyboardHeight,
+    capacitorHeight: input.capacitorHeight
+  });
+  const shrink = Number.isFinite(input.layoutShrink) ? Math.max(0, Math.round(input.layoutShrink)) : 0;
+  let inset = 0;
+  let shrinkFrame = false;
+  let notifyFrame = 0;
+  if (preference.px > 0) {
+    inset = preference.px;
+    shrinkFrame = true;
+  } else if (preference.mode === "off") {
+    inset = 0;
+  } else if (preference.mode === "estimate") {
+    inset = focused ? estimateKeyboardInset(input.innerHeight, paneHeight) : 0;
+    shrinkFrame = true;
+    notifyFrame = inset;
+  } else {
+    inset = computeEffectiveInset(kb, shrink);
+    shrinkFrame = true;
+  }
+  if (paneHeight > 0) {
+    inset = Math.min(inset, Math.round(paneHeight * KEYBOARD_MAX_SHRINK_RATIO));
+  }
+  if (inset < KEYBOARD_MIN) {
+    inset = 0;
+    notifyFrame = 0;
+  }
+  if (!shrinkFrame) {
+    inset = 0;
+  }
+  return { kb, shrink, inset, shrinkFrame, notifyFrame };
+}
 var keyboardSamples = [];
 function recordKeyboardSample(sample) {
   keyboardSamples.push(sample);
@@ -7220,12 +7271,179 @@ function recordKeyboardSample(sample) {
 }
 function getKeyboardSamples() {
   if (keyboardSamples.length === 0) return "\uFF08\u6682\u65E0\u952E\u76D8\u91C7\u6837\uFF1A\u5C1A\u672A\u805A\u7126\u8FC7\u8F93\u5165\u6846\uFF09";
-  const header = "inner	pane	vvH	cssKb	cap	kb	shrink	inset";
+  const header = "inner	pane	vvH	cssKb	cap	kb	shrink	inset	mode	focused";
   const rows = keyboardSamples.map(
-    (s) => `${s.inner}	${s.pane}	${s.vvHeight}	${s.cssKb}	${s.capacitor}	${s.kb}	${s.shrink}	${s.inset}`
+    (s) => `${s.inner}	${s.pane}	${s.vvHeight}	${s.cssKb}	${s.capacitor}	${s.kb}	${s.shrink}	${s.inset}	${s.mode}	${s.focused ? 1 : 0}`
   );
   return [header, ...rows].join("\n");
 }
+var REMEASURE_DELAYS = [60, 200, 500, 1e3, 1600];
+var BLUR_RESET_DELAY = 250;
+var KeyboardInsetController = class {
+  constructor(options) {
+    this.attached = false;
+    this.timers = /* @__PURE__ */ new Set();
+    this.blurTimer = 0;
+    this.inputFocused = false;
+    this.capacitorHeight = 0;
+    this.baselineInner = 0;
+    this.baselinePane = 0;
+    this.observer = null;
+    this.cleanup = [];
+    this.options = options;
+  }
+  attach() {
+    var _a, _b, _c, _d;
+    if (this.attached || typeof window === "undefined") return;
+    this.attached = true;
+    this.baselineInner = window.innerHeight;
+    this.baselinePane = this.options.getPaneHeight() || window.innerHeight;
+    const viewport = window.visualViewport;
+    const onResize = () => this.schedule();
+    viewport == null ? void 0 : viewport.addEventListener("resize", onResize);
+    viewport == null ? void 0 : viewport.addEventListener("scroll", onResize);
+    window.addEventListener("resize", onResize);
+    window.addEventListener("orientationchange", onResize);
+    window.addEventListener("focusin", onResize);
+    window.addEventListener("focusout", onResize);
+    this.cleanup.push(() => {
+      viewport == null ? void 0 : viewport.removeEventListener("resize", onResize);
+      viewport == null ? void 0 : viewport.removeEventListener("scroll", onResize);
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("orientationchange", onResize);
+      window.removeEventListener("focusin", onResize);
+      window.removeEventListener("focusout", onResize);
+    });
+    this.observer = new MutationObserver(() => this.schedule());
+    this.observer.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "class"] });
+    const keyboardPlugin = (_b = (_a = window.Capacitor) == null ? void 0 : _a.Plugins) == null ? void 0 : _b.Keyboard;
+    if (keyboardPlugin == null ? void 0 : keyboardPlugin.addListener) {
+      for (const event of ["keyboardWillShow", "keyboardDidShow", "keyboardWillHide", "keyboardDidHide"]) {
+        const handle = keyboardPlugin.addListener(event, (info) => {
+          var _a2;
+          this.capacitorHeight = event.includes("Show") ? (_a2 = info == null ? void 0 : info.keyboardHeight) != null ? _a2 : 0 : 0;
+          this.schedule();
+        });
+        if (handle == null ? void 0 : handle.remove) this.cleanup.push(() => {
+          var _a2;
+          return (_a2 = handle.remove) == null ? void 0 : _a2.call(handle);
+        });
+      }
+    }
+    const unsubscribe = (_d = (_c = this.options).subscribeBridgeEvents) == null ? void 0 : _d.call(_c, (event, payload) => {
+      if (event !== "inputFocus") return;
+      const focused = Boolean(payload == null ? void 0 : payload.focused);
+      window.clearTimeout(this.blurTimer);
+      if (focused) {
+        this.setInputFocused(true);
+      } else {
+        this.blurTimer = window.setTimeout(() => this.setInputFocused(false), BLUR_RESET_DELAY);
+      }
+    });
+    if (unsubscribe) this.cleanup.push(unsubscribe);
+    this.schedule();
+  }
+  detach() {
+    var _a;
+    if (!this.attached) return;
+    this.attached = false;
+    window.clearTimeout(this.blurTimer);
+    for (const id of this.timers) window.clearTimeout(id);
+    this.timers.clear();
+    (_a = this.observer) == null ? void 0 : _a.disconnect();
+    this.observer = null;
+    for (const fn of this.cleanup.splice(0)) fn();
+    const frame = this.options.getFrame();
+    if (frame) frame.style.height = "100%";
+  }
+  /** iframe 内输入框聚焦状态变化 */
+  setInputFocused(focused) {
+    this.inputFocused = focused;
+    this.schedule();
+  }
+  isInputFocused() {
+    return this.inputFocused;
+  }
+  /** 键盘动画有先后两段：按固定时间点重测，避免逐帧抖动 */
+  schedule() {
+    if (!this.attached) return;
+    for (const delay of REMEASURE_DELAYS) {
+      const id = window.setTimeout(() => {
+        this.timers.delete(id);
+        this.apply();
+      }, delay);
+      this.timers.add(id);
+    }
+  }
+  /** 立即应用一次（供测试/重载时调用） */
+  apply() {
+    if (!this.attached) return;
+    const plan = this.computePlan();
+    this.applyPlan(plan);
+  }
+  computePlan() {
+    const paneHeight = this.options.getPaneHeight() || window.innerHeight;
+    const viewport = window.visualViewport;
+    return computeKeyboardPlan({
+      preference: this.options.getPreference(),
+      focused: this.inputFocused,
+      innerHeight: window.innerHeight,
+      paneHeight,
+      visualHeight: viewport ? viewport.height : window.innerHeight,
+      visualOffsetTop: viewport ? viewport.offsetTop : 0,
+      cssKeyboardHeight: readCssKeyboardHeight(),
+      capacitorHeight: this.capacitorHeight,
+      layoutShrink: this.measureLayoutShrink(paneHeight)
+    });
+  }
+  measureLayoutShrink(paneHeight) {
+    const innerShrink = this.baselineInner - window.innerHeight;
+    const paneShrink = this.baselinePane - paneHeight;
+    return Math.max(0, innerShrink, paneShrink);
+  }
+  applyPlan(plan) {
+    const frame = this.options.getFrame();
+    if (!frame) return;
+    const paneHeight = this.options.getPaneHeight() || window.innerHeight;
+    frame.style.height = plan.shrinkFrame && plan.inset > 0 ? `calc(100% - ${plan.inset}px)` : "100%";
+    this.postKeyboardInset(plan.notifyFrame);
+    recordKeyboardSample({
+      inner: window.innerHeight,
+      pane: paneHeight,
+      vvHeight: window.visualViewport ? Math.round(window.visualViewport.height) : -1,
+      cssKb: Math.round(readCssKeyboardHeight()),
+      capacitor: Math.round(this.capacitorHeight),
+      kb: plan.kb,
+      shrink: plan.shrink,
+      inset: plan.inset,
+      mode: this.options.getPreference().px > 0 ? "manual" : this.options.getPreference().mode,
+      focused: this.inputFocused
+    });
+    if (plan.inset === 0 && !this.inputFocused) {
+      this.baselineInner = window.innerHeight;
+      this.baselinePane = paneHeight;
+    }
+  }
+  postKeyboardInset(height) {
+    const frame = this.options.getFrame();
+    if (!(frame == null ? void 0 : frame.contentWindow)) return;
+    try {
+      frame.contentWindow.postMessage(
+        {
+          source: "dsh-host",
+          type: "event",
+          event: "keyboardInset",
+          payload: { height: Math.max(0, Math.round(height)) }
+        },
+        "*"
+      );
+    } catch (e) {
+    }
+  }
+};
+
+// src/views/chat-view.ts
+var VIEW_TYPE_CHAT = "my-chat-view";
 var IFRAME_LOAD_TIMEOUT_MS = 15e3;
 var MyChatView = class extends import_obsidian9.ItemView {
   constructor(leaf, host) {
@@ -7235,7 +7453,7 @@ var MyChatView = class extends import_obsidian9.ItemView {
     this.bannerEl = null;
     this.p6BannerEl = null;
     /** 键盘避让监听（iPad/手机软键盘弹出时收缩 iframe） */
-    this.viewportHandler = null;
+    this.keyboard = null;
     /** 每次挂载 +1，异步回调回来时用它判断是否已过期 */
     this.generation = 0;
     this.host = host;
@@ -7441,164 +7659,22 @@ ${error.toDiagnostic()}`;
     this.host.bridge.detachFrame(frame);
     frame.remove();
   }
-  /**
-   * 键盘避让（iPad / iPhone）：Obsidian 的 WKWebView 在软键盘弹出时不一定缩小布局，
-   * 导致官方前端的输入框被键盘盖住。这里监听宿主窗口的 visualViewport，
-   * 把被遮挡高度换算成 iframe 的高度收缩——iframe 视口变小后，官方前端底部输入框自动上移。
-   */
+  /** 挂载键盘避让控制器（逻辑在 keyboard-inset.ts，详见 docs/ipad-keyboard.md） */
   attachKeyboardInset() {
-    var _a;
     this.detachKeyboardInset();
-    if (typeof window === "undefined") return;
-    let capacitorHeight = 0;
-    let baselineInner = window.innerHeight;
-    let baselinePane = this.contentEl.clientHeight || window.innerHeight;
-    const timers = /* @__PURE__ */ new Set();
-    const measure = () => {
-      const viewport2 = window.visualViewport;
-      return computeKeyboardInset({
-        innerHeight: window.innerHeight,
-        visualHeight: viewport2 ? viewport2.height : window.innerHeight,
-        visualOffsetTop: viewport2 ? viewport2.offsetTop : 0,
-        cssKeyboardHeight: readCssKeyboardHeight(),
-        capacitorHeight
-      });
-    };
-    const measureLayoutShrink = (paneHeight) => {
-      const innerShrink = baselineInner - window.innerHeight;
-      const paneShrink = baselinePane - paneHeight;
-      return Math.max(0, innerShrink, paneShrink);
-    };
-    let inputFocused = false;
-    let blurTimer = 0;
-    const postKeyboardInset = (height) => {
-      const frame = this.frame;
-      if (!(frame == null ? void 0 : frame.contentWindow)) return;
-      try {
-        frame.contentWindow.postMessage(
-          {
-            source: "dsh-host",
-            type: "event",
-            event: "keyboardInset",
-            payload: { height: Math.max(0, Math.round(height)) }
-          },
-          "*"
-        );
-      } catch (e) {
-      }
-    };
-    const apply = () => {
-      const frame = this.frame;
-      if (!frame) return;
-      const paneHeight = this.contentEl.clientHeight || window.innerHeight;
-      const kb = measure();
-      const shrink = measureLayoutShrink(paneHeight);
-      const preference = this.host.getKeyboardInset();
-      let inset = 0;
-      let shrinkFrame = false;
-      if (preference.px > 0) {
-        inset = preference.px;
-        shrinkFrame = true;
-        postKeyboardInset(0);
-      } else if (preference.mode === "off") {
-        inset = 0;
-        postKeyboardInset(0);
-      } else if (preference.mode === "estimate") {
-        inset = inputFocused ? estimateKeyboardInset(window.innerHeight, paneHeight) : 0;
-        shrinkFrame = true;
-        postKeyboardInset(inset);
-      } else {
-        inset = computeEffectiveInset(kb, shrink);
-        shrinkFrame = true;
-        postKeyboardInset(0);
-      }
-      inset = Math.min(inset, Math.round(paneHeight * 0.55));
-      frame.style.height = shrinkFrame && inset > KEYBOARD_MIN ? `calc(100% - ${inset}px)` : "100%";
-      recordKeyboardSample({
-        inner: window.innerHeight,
-        pane: paneHeight,
-        vvHeight: window.visualViewport ? Math.round(window.visualViewport.height) : -1,
-        cssKb: Math.round(readCssKeyboardHeight()),
-        capacitor: Math.round(capacitorHeight),
-        kb: Math.round(kb),
-        shrink: Math.round(shrink),
-        inset: Math.round(inset)
-      });
-      if (kb === 0 && inset === 0) {
-        baselineInner = window.innerHeight;
-        baselinePane = paneHeight;
-      }
-    };
-    const schedule = () => {
-      for (const delay of [60, 200, 500, 1e3, 1600]) {
-        const id = window.setTimeout(() => {
-          timers.delete(id);
-          apply();
-        }, delay);
-        timers.add(id);
-      }
-    };
-    const viewport = window.visualViewport;
-    const onResize = () => schedule();
-    viewport == null ? void 0 : viewport.addEventListener("resize", onResize);
-    viewport == null ? void 0 : viewport.addEventListener("scroll", onResize);
-    window.addEventListener("resize", onResize);
-    window.addEventListener("orientationchange", onResize);
-    const observer = new MutationObserver(() => schedule());
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "class"] });
-    const onFocus = () => schedule();
-    window.addEventListener("focusin", onFocus);
-    window.addEventListener("focusout", onFocus);
-    const capacitor = window.Capacitor;
-    const keyboardPlugin = (_a = capacitor == null ? void 0 : capacitor.Plugins) == null ? void 0 : _a.Keyboard;
-    const listeners = [];
-    if (keyboardPlugin == null ? void 0 : keyboardPlugin.addListener) {
-      for (const event of ["keyboardWillShow", "keyboardDidShow", "keyboardWillHide", "keyboardDidHide"]) {
-        listeners.push(
-          keyboardPlugin.addListener(event, (info) => {
-            var _a2;
-            capacitorHeight = event.includes("Show") ? (_a2 = info == null ? void 0 : info.keyboardHeight) != null ? _a2 : 0 : 0;
-            schedule();
-          })
-        );
-      }
-    }
-    const offBridgeEvent = this.host.bridge.onEvent((event, payload) => {
-      if (event !== "inputFocus") return;
-      const focused = Boolean(payload == null ? void 0 : payload.focused);
-      window.clearTimeout(blurTimer);
-      if (focused) {
-        inputFocused = true;
-        schedule();
-      } else {
-        blurTimer = window.setTimeout(() => {
-          inputFocused = false;
-          schedule();
-        }, 250);
-      }
+    const controller = new KeyboardInsetController({
+      getFrame: () => this.frame,
+      getPaneHeight: () => this.contentEl.clientHeight || window.innerHeight,
+      getPreference: () => this.host.getKeyboardInset(),
+      subscribeBridgeEvents: (listener) => this.host.bridge.onEvent(listener)
     });
-    schedule();
-    this.viewportHandler = () => {
-      var _a2;
-      offBridgeEvent();
-      window.clearTimeout(blurTimer);
-      for (const id of timers) window.clearTimeout(id);
-      timers.clear();
-      viewport == null ? void 0 : viewport.removeEventListener("resize", onResize);
-      viewport == null ? void 0 : viewport.removeEventListener("scroll", onResize);
-      window.removeEventListener("resize", onResize);
-      window.removeEventListener("orientationchange", onResize);
-      window.removeEventListener("focusin", onFocus);
-      window.removeEventListener("focusout", onFocus);
-      observer.disconnect();
-      for (const handle of listeners) (_a2 = handle == null ? void 0 : handle.remove) == null ? void 0 : _a2.call(handle);
-      if (this.frame) this.frame.style.height = "100%";
-    };
+    controller.attach();
+    this.keyboard = controller;
   }
   detachKeyboardInset() {
     var _a;
-    (_a = this.viewportHandler) == null ? void 0 : _a.call(this);
-    this.viewportHandler = null;
+    (_a = this.keyboard) == null ? void 0 : _a.detach();
+    this.keyboard = null;
   }
 };
 
@@ -8201,7 +8277,9 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
     this.registerView(VIEW_TYPE_SESSIONS, (leaf) => new SessionsView(leaf, this));
     this.registerView(VIEW_TYPE_SEARCH, (leaf) => new SearchView(leaf, this));
     this.addRibbonIcon("message-square", "My Chat", () => {
-      void this.activateChatView({ openSessionsPanel: false });
+      void this.activateChatView({
+        openSessionsPanel: this.settings.openSessionsOnStart && !this.settings.sessionsPanelEverOpened
+      });
     });
     this.addCommand({
       id: "open-chat",
@@ -9217,6 +9295,7 @@ var ImportHistoryModal = class extends import_obsidian12.Modal {
   bytesToBase64,
   computeEffectiveInset,
   computeKeyboardInset,
+  computeKeyboardPlan,
   createAgentBridgeClient,
   createAgentRuntime,
   createHtmlBlobUrl,

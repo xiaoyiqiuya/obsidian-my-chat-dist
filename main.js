@@ -405,7 +405,7 @@ __export(main_exports, {
   toggleCollapsedGroup: () => toggleCollapsedGroup
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian12 = require("obsidian");
+var import_obsidian13 = require("obsidian");
 
 // src/agent-confirm-modal.ts
 var import_obsidian = require("obsidian");
@@ -7190,7 +7190,7 @@ var ThemeController = class {
 };
 
 // src/views/chat-view.ts
-var import_obsidian9 = require("obsidian");
+var import_obsidian10 = require("obsidian");
 
 // src/views/keyboard-inset.ts
 var KEYBOARD_MAX = 520;
@@ -7465,10 +7465,87 @@ var KeyboardInsetController = class {
   }
 };
 
+// src/debug/report.ts
+var import_obsidian9 = require("obsidian");
+var DEBUG_REPORT_URL = "http://192.168.192.120:47829/diag";
+function rectOf(el) {
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  return {
+    top: Math.round(r.top),
+    left: Math.round(r.left),
+    width: Math.round(r.width),
+    height: Math.round(r.height)
+  };
+}
+function classOf(el) {
+  const cls = typeof el.className === "string" ? el.className : "";
+  return `${el.tagName}.${cls.split(/\s+/).filter(Boolean).slice(0, 2).join(".")}`.slice(0, 60);
+}
+function collectLayout(frame, contentEl, state) {
+  var _a, _b, _c;
+  const viewport = window.visualViewport;
+  const scrollAncestors = [];
+  let node = contentEl;
+  for (let i = 0; node && i < 10; i += 1) {
+    const html = node;
+    scrollAncestors.push({
+      cls: classOf(node),
+      scrollTop: Math.round((_a = html.scrollTop) != null ? _a : 0),
+      scrollHeight: Math.round((_b = html.scrollHeight) != null ? _b : 0),
+      clientHeight: Math.round((_c = html.clientHeight) != null ? _c : 0)
+    });
+    node = node.parentElement;
+  }
+  return {
+    event: "layout",
+    innerHeight: window.innerHeight,
+    innerWidth: window.innerWidth,
+    scrollY: Math.round(window.scrollY),
+    docScroll: Math.round(document.documentElement.scrollTop),
+    bodyScroll: Math.round(document.body.scrollTop),
+    vvHeight: viewport ? Math.round(viewport.height) : -1,
+    vvOffsetTop: viewport ? Math.round(viewport.offsetTop) : -1,
+    vvPageTop: viewport ? Math.round(viewport.pageTop) : -1,
+    vvScale: viewport ? Number(viewport.scale.toFixed(3)) : -1,
+    activeElement: document.activeElement ? classOf(document.activeElement) : "none",
+    frameRect: rectOf(frame),
+    contentRect: rectOf(contentEl),
+    frameStyleHeight: frame ? frame.style.height : "",
+    scrollAncestors,
+    inset: state.inset,
+    focused: state.focused,
+    mode: state.mode
+  };
+}
+var lastSent = 0;
+var lastKey = "";
+function reportLayout(snapshot) {
+  var _a, _b;
+  if (!DEBUG_REPORT_URL || !import_obsidian9.Platform.isMobile) return;
+  const key = `${snapshot.event}:${snapshot.inset}:${snapshot.focused}:${snapshot.scrollY}:${(_b = (_a = snapshot.frameRect) == null ? void 0 : _a.height) != null ? _b : -1}`;
+  const now = Date.now();
+  if (key === lastKey && now - lastSent < 400) return;
+  lastKey = key;
+  lastSent = now;
+  void (async () => {
+    try {
+      await (0, import_obsidian9.requestUrl)({
+        url: DEBUG_REPORT_URL,
+        method: "POST",
+        contentType: "application/json",
+        body: JSON.stringify(snapshot),
+        throw: false
+      });
+    } catch (e) {
+    }
+  })();
+}
+
 // src/views/chat-view.ts
 var VIEW_TYPE_CHAT = "my-chat-view";
 var IFRAME_LOAD_TIMEOUT_MS = 15e3;
-var MyChatView = class extends import_obsidian9.ItemView {
+var MyChatView = class extends import_obsidian10.ItemView {
   constructor(leaf, host) {
     super(leaf);
     this.frame = null;
@@ -7623,7 +7700,7 @@ var MyChatView = class extends import_obsidian9.ItemView {
           label: "\u590D\u5236\u8BCA\u65AD\u4FE1\u606F",
           onClick: () => {
             void copyText(this.host.getDiagnostics("\u7B49\u5F85\u4F1A\u8BDD\u6865\u63A5\u8D85\u65F6\uFF088s\uFF09")).then((ok) => {
-              new import_obsidian9.Notice(ok ? "\u8BCA\u65AD\u4FE1\u606F\u5DF2\u590D\u5236" : "\u590D\u5236\u5931\u8D25\uFF0C\u8BF7\u624B\u52A8\u622A\u56FE\u53CD\u9988");
+              new import_obsidian10.Notice(ok ? "\u8BCA\u65AD\u4FE1\u606F\u5DF2\u590D\u5236" : "\u590D\u5236\u5931\u8D25\uFF0C\u8BF7\u624B\u52A8\u622A\u56FE\u53CD\u9988");
             });
           }
         }
@@ -7692,17 +7769,27 @@ ${error.toDiagnostic()}`;
       getPaneHeight: () => this.contentEl.clientHeight || window.innerHeight,
       getPreference: () => this.host.getKeyboardInset(),
       subscribeBridgeEvents: (listener) => this.host.bridge.onEvent(listener),
-      onPlan: (plan, focused) => this.updateKeyboardBadge(plan.inset, focused)
+      onPlan: (plan, focused) => this.onKeyboardPlan(plan.inset, focused)
     });
     controller.attach();
     this.keyboard = controller;
   }
   /**
-   * 移动端诊断角标：显示当前键盘避让高度与聚焦状态。
-   * 没有开发者工具时，靠它能在截屏里直接看出插件是否生效、补了多少。
+   * 移动端诊断角标 + 远程上报（iPad 无开发者工具时的现场取证）。
+   * 角标显示视口/滚动/iframe 几何/避让状态；同时把同一份快照 POST 到开发机。
    */
-  updateKeyboardBadge(inset, focused) {
-    if (!import_obsidian9.Platform.isMobile) return;
+  onKeyboardPlan(inset, focused) {
+    if (!import_obsidian10.Platform.isMobile) return;
+    const mode = this.host.getKeyboardInset();
+    const snapshot = collectLayout(this.frame, this.contentEl, {
+      inset,
+      focused,
+      mode: mode.px > 0 ? `manual:${mode.px}` : mode.mode
+    });
+    reportLayout(snapshot);
+    this.renderKeyboardBadge(snapshot);
+  }
+  renderKeyboardBadge(snapshot) {
     if (!this.keyboardBadge) {
       const badge = document.createElement("div");
       badge.style.cssText = [
@@ -7710,20 +7797,31 @@ ${error.toDiagnostic()}`;
         "right:10px",
         "top:64px",
         "z-index:9999",
-        "padding:2px 6px",
+        "padding:3px 6px",
         "border-radius:4px",
-        "background:rgba(0,0,0,.55)",
-        "color:#fff",
-        "font:10px/1.5 monospace",
+        "background:rgba(255,255,255,.94)",
+        "border:1px solid rgba(0,0,0,.15)",
+        "color:#c00",
+        "font:9px/1.35 monospace",
+        "white-space:pre",
         "pointer-events:none",
-        "opacity:.75"
+        "opacity:.9"
       ].join(";");
       document.body.appendChild(badge);
       this.keyboardBadge = badge;
     }
-    const text = `KB inset=${inset} focus=${focused ? 1 : 0} sy=${Math.round(window.scrollY)}`;
-    this.keyboardBadge.textContent = text;
-    this.keyboardBadge.style.display = inset > 0 || focused ? "block" : "none";
+    const frameRect = snapshot.frameRect;
+    const contentRect = snapshot.contentRect;
+    const ancestors = snapshot.scrollAncestors.filter((item) => item.scrollTop !== 0).map((item) => `${item.cls}:${item.scrollTop}`).slice(0, 2).join(" ");
+    const lines = [
+      `in=${snapshot.innerHeight} vv=${snapshot.vvHeight} off=${snapshot.vvOffsetTop}`,
+      `sy=${snapshot.scrollY} ds=${snapshot.docScroll} bs=${snapshot.bodyScroll}`,
+      `frame=${frameRect ? frameRect.top + "/" + frameRect.height : "-"} box=${contentRect ? contentRect.top + "/" + contentRect.height : "-"}`,
+      `inset=${snapshot.inset} f=${snapshot.focused ? 1 : 0} ${snapshot.mode}`
+    ];
+    if (ancestors) lines.push(`anc ${ancestors}`);
+    this.keyboardBadge.textContent = lines.join("\n");
+    this.keyboardBadge.style.display = snapshot.focused || snapshot.inset > 0 ? "block" : "none";
   }
   removeKeyboardBadge() {
     var _a;
@@ -7739,11 +7837,11 @@ ${error.toDiagnostic()}`;
 };
 
 // src/views/search-view.ts
-var import_obsidian10 = require("obsidian");
+var import_obsidian11 = require("obsidian");
 var VIEW_TYPE_SEARCH = "my-chat-search";
 var MAX_NOTE_RESULTS = 30;
 var MAX_CONTENT_SCAN = 300;
-var SearchView = class extends import_obsidian10.ItemView {
+var SearchView = class extends import_obsidian11.ItemView {
   constructor(leaf, host) {
     super(leaf);
     this.notesEl = null;
@@ -8001,13 +8099,13 @@ var SearchView = class extends import_obsidian10.ItemView {
   async openNote(path) {
     try {
       const file = this.app.vault.getAbstractFileByPath(path);
-      if (!(file instanceof import_obsidian10.TFile)) {
-        new import_obsidian10.Notice("\u6253\u5F00\u7B14\u8BB0\u5931\u8D25\uFF1A\u6587\u4EF6\u4E0D\u5B58\u5728\u6216\u5DF2\u88AB\u79FB\u52A8");
+      if (!(file instanceof import_obsidian11.TFile)) {
+        new import_obsidian11.Notice("\u6253\u5F00\u7B14\u8BB0\u5931\u8D25\uFF1A\u6587\u4EF6\u4E0D\u5B58\u5728\u6216\u5DF2\u88AB\u79FB\u52A8");
         return;
       }
       await this.app.workspace.getLeaf(false).openFile(file);
     } catch (err) {
-      new import_obsidian10.Notice("\u6253\u5F00\u7B14\u8BB0\u5931\u8D25\uFF1A" + describeError(err));
+      new import_obsidian11.Notice("\u6253\u5F00\u7B14\u8BB0\u5931\u8D25\uFF1A" + describeError(err));
     }
   }
   showStatus(message) {
@@ -8017,14 +8115,14 @@ var SearchView = class extends import_obsidian10.ItemView {
   }
   async copyDiagnostics() {
     const ok = await copyText(this.host.getDiagnostics("\u641C\u7D22\u89C6\u56FE\uFF1A\u4F1A\u8BDD\u641C\u7D22\u5931\u8D25"));
-    new import_obsidian10.Notice(ok ? "\u8BCA\u65AD\u4FE1\u606F\u5DF2\u590D\u5236" : "\u590D\u5236\u5931\u8D25");
+    new import_obsidian11.Notice(ok ? "\u8BCA\u65AD\u4FE1\u606F\u5DF2\u590D\u5236" : "\u590D\u5236\u5931\u8D25");
   }
 };
 
 // src/views/sessions-view.ts
-var import_obsidian11 = require("obsidian");
+var import_obsidian12 = require("obsidian");
 var VIEW_TYPE_SESSIONS = "my-chat-sessions";
-var SessionsView = class extends import_obsidian11.ItemView {
+var SessionsView = class extends import_obsidian12.ItemView {
   constructor(leaf, host) {
     super(leaf);
     this.listEl = null;
@@ -8279,7 +8377,7 @@ var SessionsView = class extends import_obsidian11.ItemView {
 
 // src/main.ts
 var LOG_PREFIX = "[my-chat]";
-var MyChatPlugin = class extends import_obsidian12.Plugin {
+var MyChatPlugin = class extends import_obsidian13.Plugin {
   constructor() {
     super(...arguments);
     this.settings = { ...DEFAULT_SETTINGS };
@@ -8307,7 +8405,7 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
   }
   async onload() {
     await this.loadSettings();
-    this.log("onload\uFF0C\u684C\u9762\u7AEF =", import_obsidian12.Platform.isDesktopApp, "\u8BBE\u7F6E =", {
+    this.log("onload\uFF0C\u684C\u9762\u7AEF =", import_obsidian13.Platform.isDesktopApp, "\u8BBE\u7F6E =", {
       locale: this.settings.locale,
       themeMode: this.settings.themeMode,
       hasApiKey: this.settings.apiKey.length > 0
@@ -8316,7 +8414,7 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
     this.theme = new ThemeController(this);
     this.focus = new FocusController(this);
     this.assetProvider = new ChatAssetProvider({
-      isMobile: import_obsidian12.Platform.isMobile,
+      isMobile: import_obsidian13.Platform.isMobile,
       manifestDir: this.manifest.dir,
       readTextFile: (vaultPath) => this.app.vault.adapter.read(vaultPath),
       createBlobUrl: (html) => createHtmlBlobUrl(html),
@@ -8328,7 +8426,7 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
       embeddedVersion: WWW_VERSION,
       logger: { warn: (message) => console.warn("[my-chat]", message) }
     });
-    if (import_obsidian12.Platform.isMobile) {
+    if (import_obsidian13.Platform.isMobile) {
       this.initMobileStorage();
     }
     this.bridge.subscribeAgentEvents(["userMessage", "assistantReply"]);
@@ -8549,50 +8647,50 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
   /** 立即备份（设置页按钮） */
   async runBackupNow() {
     var _a, _b, _c;
-    if (!import_obsidian12.Platform.isMobile) {
-      new import_obsidian12.Notice("\u81EA\u52A8\u5907\u4EFD\u76EE\u524D\u9488\u5BF9\u79FB\u52A8\u7AEF/iPad\uFF1B\u684C\u9762\u7AEF\u53EF\u76F4\u63A5\u4F7F\u7528\u300C\u5BFC\u51FA\u5386\u53F2\u300D\u3002");
+    if (!import_obsidian13.Platform.isMobile) {
+      new import_obsidian13.Notice("\u81EA\u52A8\u5907\u4EFD\u76EE\u524D\u9488\u5BF9\u79FB\u52A8\u7AEF/iPad\uFF1B\u684C\u9762\u7AEF\u53EF\u76F4\u63A5\u4F7F\u7528\u300C\u5BFC\u51FA\u5386\u53F2\u300D\u3002");
       return;
     }
     if (!this.backupGuard) {
-      new import_obsidian12.Notice("\u5907\u4EFD\u670D\u52A1\u672A\u521D\u59CB\u5316\uFF08\u8BE6\u89C1\u63A7\u5236\u53F0\uFF09");
+      new import_obsidian13.Notice("\u5907\u4EFD\u670D\u52A1\u672A\u521D\u59CB\u5316\uFF08\u8BE6\u89C1\u63A7\u5236\u53F0\uFF09");
       return;
     }
     if (!this.bridge.hasFrames) {
-      new import_obsidian12.Notice("\u8BF7\u5148\u6253\u5F00\u5BF9\u8BDD\u754C\u9762\uFF0C\u518D\u6267\u884C\u5907\u4EFD\u3002");
+      new import_obsidian13.Notice("\u8BF7\u5148\u6253\u5F00\u5BF9\u8BDD\u754C\u9762\uFF0C\u518D\u6267\u884C\u5907\u4EFD\u3002");
       return;
     }
-    new import_obsidian12.Notice("\u6B63\u5728\u5907\u4EFD\u4F1A\u8BDD\u5230 vault\uFF0C\u8BF7\u7A0D\u5019\u2026");
+    new import_obsidian13.Notice("\u6B63\u5728\u5907\u4EFD\u4F1A\u8BDD\u5230 vault\uFF0C\u8BF7\u7A0D\u5019\u2026");
     const result = await this.backupGuard.backupNow();
     await this.refreshBackupMeta();
     if (result.ok && !result.skipped) {
       const sizeMb = (((_a = result.size) != null ? _a : 0) / 1024 / 1024).toFixed(2);
-      new import_obsidian12.Notice(
+      new import_obsidian13.Notice(
         `\u5907\u4EFD\u5B8C\u6210\uFF1A${result.zipName}\uFF08${(_b = result.sessionCount) != null ? _b : 0} \u4E2A\u4F1A\u8BDD\uFF0C${sizeMb} MB\uFF09`,
         6e3
       );
     } else if (result.skipped) {
-      new import_obsidian12.Notice(`\u5DF2\u8DF3\u8FC7\u5907\u4EFD\uFF1A${result.reason}`);
+      new import_obsidian13.Notice(`\u5DF2\u8DF3\u8FC7\u5907\u4EFD\uFF1A${result.reason}`);
     } else {
-      new import_obsidian12.Notice(`\u5907\u4EFD\u5931\u8D25\uFF1A${(_c = result.error) != null ? _c : result.reason}`, 8e3);
+      new import_obsidian13.Notice(`\u5907\u4EFD\u5931\u8D25\uFF1A${(_c = result.error) != null ? _c : result.reason}`, 8e3);
     }
   }
   /** 从最近备份恢复（设置页 / 自检提示） */
   async restoreFromBackup() {
     var _a, _b, _c;
     if (!this.backupGuard) {
-      new import_obsidian12.Notice("\u5907\u4EFD\u670D\u52A1\u672A\u521D\u59CB\u5316\uFF08\u8BE6\u89C1\u63A7\u5236\u53F0\uFF09");
+      new import_obsidian13.Notice("\u5907\u4EFD\u670D\u52A1\u672A\u521D\u59CB\u5316\uFF08\u8BE6\u89C1\u63A7\u5236\u53F0\uFF09");
       return;
     }
-    new import_obsidian12.Notice("\u6B63\u5728\u4ECE\u5907\u4EFD\u6062\u590D\u4F1A\u8BDD\uFF0C\u8BF7\u7A0D\u5019\u2026");
+    new import_obsidian13.Notice("\u6B63\u5728\u4ECE\u5907\u4EFD\u6062\u590D\u4F1A\u8BDD\uFF0C\u8BF7\u7A0D\u5019\u2026");
     const result = await this.backupGuard.restoreLatest();
     if (result.ok) {
-      new import_obsidian12.Notice(`\u5DF2\u4ECE\u5907\u4EFD\u6062\u590D ${(_a = result.sessions) != null ? _a : 0} \u4E2A\u4F1A\u8BDD\uFF0C\u6B63\u5728\u91CD\u65B0\u52A0\u8F7D\u804A\u5929\u2026`, 6e3);
+      new import_obsidian13.Notice(`\u5DF2\u4ECE\u5907\u4EFD\u6062\u590D ${(_a = result.sessions) != null ? _a : 0} \u4E2A\u4F1A\u8BDD\uFF0C\u6B63\u5728\u91CD\u65B0\u52A0\u8F7D\u804A\u5929\u2026`, 6e3);
       this.reloadChat();
       await this.refreshBackupMeta();
     } else if (result.reason === "no-backup") {
-      new import_obsidian12.Notice("\u6CA1\u6709\u627E\u5230\u5907\u4EFD\uFF08latest.json \u4E0D\u5B58\u5728\u6216\u5DF2\u635F\u574F\uFF09\u3002");
+      new import_obsidian13.Notice("\u6CA1\u6709\u627E\u5230\u5907\u4EFD\uFF08latest.json \u4E0D\u5B58\u5728\u6216\u5DF2\u635F\u574F\uFF09\u3002");
     } else {
-      new import_obsidian12.Notice(`\u6062\u590D\u5931\u8D25\uFF1A${(_c = (_b = result.error) != null ? _b : result.reason) != null ? _c : "\u672A\u77E5\u9519\u8BEF"}`, 8e3);
+      new import_obsidian13.Notice(`\u6062\u590D\u5931\u8D25\uFF1A${(_c = (_b = result.error) != null ? _b : result.reason) != null ? _c : "\u672A\u77E5\u9519\u8BEF"}`, 8e3);
     }
   }
   /** 立即跑一次存储自检（设置页 / 自检弹窗「重新自检」） */
@@ -8612,7 +8710,7 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
       this.storageProbeResult = result;
       this.log("[storage-probe]", result.status, result.message);
       if (manual) {
-        new import_obsidian12.Notice(result.message, 8e3);
+        new import_obsidian13.Notice(result.message, 8e3);
         return;
       }
       const abnormal = result.status === "empty-with-backup" || result.status === "bridge-timeout" || result.status === "bridge-error" || result.status === "localstorage-unavailable";
@@ -8635,7 +8733,7 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
   /** 备份状态文本（设置页） */
   getBackupStatus() {
     var _a;
-    if (!import_obsidian12.Platform.isMobile) return "\u81EA\u52A8\u5907\u4EFD\u9488\u5BF9\u79FB\u52A8\u7AEF/iPad\uFF1B\u684C\u9762\u7AEF\u53EF\u7528\u300C\u5BFC\u51FA\u5386\u53F2\u300D";
+    if (!import_obsidian13.Platform.isMobile) return "\u81EA\u52A8\u5907\u4EFD\u9488\u5BF9\u79FB\u52A8\u7AEF/iPad\uFF1B\u684C\u9762\u7AEF\u53EF\u7528\u300C\u5BFC\u51FA\u5386\u53F2\u300D";
     if (!this.settings.autoBackupEnabled) return "\u81EA\u52A8\u5907\u4EFD\u5DF2\u5173\u95ED\uFF08\u4ECD\u53EF\u624B\u52A8\u300C\u7ACB\u5373\u5907\u4EFD\u300D\uFF09";
     if (!this.backupGuard) return "\u5907\u4EFD\u670D\u52A1\u672A\u521D\u59CB\u5316";
     if (!this.lastBackupMeta) return "\u8FD8\u6CA1\u6709\u5907\u4EFD\u8BB0\u5F55\uFF08\u6253\u5F00\u5BF9\u8BDD\u540E\u4F1A\u81EA\u52A8\u5907\u4EFD\uFF09";
@@ -8740,7 +8838,7 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
     );
     const text = [notice.text, ...conflictLines].join("\n");
     if (views.length === 0) {
-      new import_obsidian12.Notice(text, 1e4);
+      new import_obsidian13.Notice(text, 1e4);
       return;
     }
     views.forEach((view) => {
@@ -8754,7 +8852,7 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
               view.dismissP6Notice();
               void ((_a = this.p6Runtime) == null ? void 0 : _a.rewriteLastReply(notice.rewriteReference).then((result) => {
                 var _a2;
-                if (!result.ok) new import_obsidian12.Notice("\u6309\u8BBE\u5B9A\u91CD\u5199\u5931\u8D25\uFF1A" + ((_a2 = result.error) != null ? _a2 : "\u672A\u77E5\u9519\u8BEF"), 8e3);
+                if (!result.ok) new import_obsidian13.Notice("\u6309\u8BBE\u5B9A\u91CD\u5199\u5931\u8D25\uFF1A" + ((_a2 = result.error) != null ? _a2 : "\u672A\u77E5\u9519\u8BEF"), 8e3);
               }));
             }
           },
@@ -8778,10 +8876,10 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
         var _a;
         void ((_a = this.p6Runtime) == null ? void 0 : _a.confirmNewEntities(selected, sessionId).then((result) => {
           if (result.created.length > 0) {
-            new import_obsidian12.Notice(`\u5DF2\u52A0\u5165\u8BBE\u5B9A\u96C6\uFF1A${result.created.join("\u3001")}`, 6e3);
+            new import_obsidian13.Notice(`\u5DF2\u52A0\u5165\u8BBE\u5B9A\u96C6\uFF1A${result.created.join("\u3001")}`, 6e3);
           }
           if (result.failed.length > 0) {
-            new import_obsidian12.Notice(`\u4EE5\u4E0B\u5B9E\u4F53\u5EFA\u6863\u5931\u8D25\uFF1A${result.failed.join("\u3001")}`, 8e3);
+            new import_obsidian13.Notice(`\u4EE5\u4E0B\u5B9E\u4F53\u5EFA\u6863\u5931\u8D25\uFF1A${result.failed.join("\u3001")}`, 8e3);
           }
         }));
       }
@@ -8911,7 +9009,7 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
   }
   /** 仅在桌面端调用；动态加载 server-impl，避免移动端触碰 Node 内置模块 */
   async startServer() {
-    if (!import_obsidian12.Platform.isDesktopApp) {
+    if (!import_obsidian13.Platform.isDesktopApp) {
       throw new Error("\u79FB\u52A8\u7AEF\u652F\u6301\u5F00\u53D1\u4E2D\uFF1A\u5F53\u524D\u7248\u672C\u4EC5\u5728\u684C\u9762\u7AEF\u542F\u52A8\u672C\u5730\u670D\u52A1");
     }
     let impl;
@@ -8993,21 +9091,21 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
   /** 打开指定会话（先确保对话视图存在并等待桥接就绪） */
   async openSession(sessionId) {
     if (!sessionId) {
-      new import_obsidian12.Notice("\u6253\u5F00\u4F1A\u8BDD\u5931\u8D25\uFF1A\u4F1A\u8BDD id \u4E3A\u7A7A");
+      new import_obsidian13.Notice("\u6253\u5F00\u4F1A\u8BDD\u5931\u8D25\uFF1A\u4F1A\u8BDD id \u4E3A\u7A7A");
       return;
     }
     await this.activateChatView();
     const ready = await this.bridge.waitForReady(BRIDGE_READY_TIMEOUT_MS);
     if (!ready) {
-      new import_obsidian12.Notice("\u4F1A\u8BDD\u6865\u63A5\u672A\u5C31\u7EEA\uFF0C\u6682\u65F6\u65E0\u6CD5\u5207\u6362\u4F1A\u8BDD\u3002\u8BF7\u7A0D\u540E\u91CD\u8BD5\uFF0C\u6216\u6267\u884C\u300C\u91CD\u8F7D\u804A\u5929\u300D\u3002");
+      new import_obsidian13.Notice("\u4F1A\u8BDD\u6865\u63A5\u672A\u5C31\u7EEA\uFF0C\u6682\u65F6\u65E0\u6CD5\u5207\u6362\u4F1A\u8BDD\u3002\u8BF7\u7A0D\u540E\u91CD\u8BD5\uFF0C\u6216\u6267\u884C\u300C\u91CD\u8F7D\u804A\u5929\u300D\u3002");
       return;
     }
     try {
       await this.bridge.request("openSession", { id: sessionId, sessionId });
-      new import_obsidian12.Notice("\u5DF2\u6253\u5F00\u4F1A\u8BDD");
+      new import_obsidian13.Notice("\u5DF2\u6253\u5F00\u4F1A\u8BDD");
     } catch (err) {
       this.log("openSession \u5931\u8D25", err);
-      new import_obsidian12.Notice("\u5207\u6362\u4F1A\u8BDD\u5931\u8D25\uFF1A" + describeError(err));
+      new import_obsidian13.Notice("\u5207\u6362\u4F1A\u8BDD\u5931\u8D25\uFF1A" + describeError(err));
     }
   }
   /** 重新加载所有对话视图的 iframe */
@@ -9016,7 +9114,7 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
     const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
     if (!leaves.length) {
       void this.activateChatView();
-      new import_obsidian12.Notice("\u5DF2\u6253\u5F00\u5BF9\u8BDD\u89C6\u56FE");
+      new import_obsidian13.Notice("\u5DF2\u6253\u5F00\u5BF9\u8BDD\u89C6\u56FE");
       return;
     }
     let reloaded = 0;
@@ -9027,25 +9125,25 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
         reloaded += 1;
       }
     });
-    new import_obsidian12.Notice(reloaded ? "\u6B63\u5728\u91CD\u65B0\u52A0\u8F7D\u804A\u5929\u2026" : "\u6CA1\u6709\u53EF\u91CD\u65B0\u52A0\u8F7D\u7684\u5BF9\u8BDD\u89C6\u56FE");
+    new import_obsidian13.Notice(reloaded ? "\u6B63\u5728\u91CD\u65B0\u52A0\u8F7D\u804A\u5929\u2026" : "\u6CA1\u6709\u53EF\u91CD\u65B0\u52A0\u8F7D\u7684\u5BF9\u8BDD\u89C6\u56FE");
   }
   /** 新建对话：调用 bridge newSession（前端未实现时中文降级提示） */
   async newChat() {
     await this.activateChatView();
     const ready = await this.bridge.waitForReady(BRIDGE_READY_TIMEOUT_MS);
     if (!ready) {
-      new import_obsidian12.Notice("\u4F1A\u8BDD\u6865\u63A5\u672A\u5C31\u7EEA\uFF0C\u6682\u65F6\u65E0\u6CD5\u65B0\u5EFA\u5BF9\u8BDD\u3002\u8BF7\u7A0D\u540E\u91CD\u8BD5\uFF0C\u6216\u6267\u884C\u300C\u91CD\u8F7D\u804A\u5929\u300D\u3002");
+      new import_obsidian13.Notice("\u4F1A\u8BDD\u6865\u63A5\u672A\u5C31\u7EEA\uFF0C\u6682\u65F6\u65E0\u6CD5\u65B0\u5EFA\u5BF9\u8BDD\u3002\u8BF7\u7A0D\u540E\u91CD\u8BD5\uFF0C\u6216\u6267\u884C\u300C\u91CD\u8F7D\u804A\u5929\u300D\u3002");
       return;
     }
     try {
       await this.bridge.request("newSession", {}, 5e3);
-      new import_obsidian12.Notice("\u5DF2\u65B0\u5EFA\u5BF9\u8BDD");
+      new import_obsidian13.Notice("\u5DF2\u65B0\u5EFA\u5BF9\u8BDD");
     } catch (err) {
       this.log("newSession \u672A\u6210\u529F", err);
       if (isUnsupportedBridgeError(err)) {
-        new import_obsidian12.Notice("\u5F53\u524D\u524D\u7AEF\u6865\u63A5\u4E0D\u652F\u6301\u65B0\u5EFA\u5BF9\u8BDD\uFF0C\u8BF7\u66F4\u65B0\u524D\u7AEF\uFF08www\uFF09\u540E\u91CD\u8BD5\uFF1B\u4E5F\u53EF\u76F4\u63A5\u5728\u804A\u5929\u754C\u9762\u70B9\u300C\u65B0\u5EFA\u5BF9\u8BDD\u300D\u3002", 6e3);
+        new import_obsidian13.Notice("\u5F53\u524D\u524D\u7AEF\u6865\u63A5\u4E0D\u652F\u6301\u65B0\u5EFA\u5BF9\u8BDD\uFF0C\u8BF7\u66F4\u65B0\u524D\u7AEF\uFF08www\uFF09\u540E\u91CD\u8BD5\uFF1B\u4E5F\u53EF\u76F4\u63A5\u5728\u804A\u5929\u754C\u9762\u70B9\u300C\u65B0\u5EFA\u5BF9\u8BDD\u300D\u3002", 6e3);
       } else {
-        new import_obsidian12.Notice("\u65B0\u5EFA\u5BF9\u8BDD\u5931\u8D25\uFF1A" + describeError(err));
+        new import_obsidian13.Notice("\u65B0\u5EFA\u5BF9\u8BDD\u5931\u8D25\uFF1A" + describeError(err));
       }
     }
   }
@@ -9067,26 +9165,26 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
   /** 导出全部历史：bridge exportAll → 原生保存对话框 / 下载 / vault 兜底落盘 */
   async exportHistory() {
     await this.activateChatView();
-    new import_obsidian12.Notice("\u6B63\u5728\u5BFC\u51FA\u5386\u53F2\uFF0C\u8BF7\u7A0D\u5019\u2026");
+    new import_obsidian13.Notice("\u6B63\u5728\u5BFC\u51FA\u5386\u53F2\uFF0C\u8BF7\u7A0D\u5019\u2026");
     try {
       const { fileName, bytes } = await this.exportHistoryData();
-      const outcome = import_obsidian12.Platform.isMobile ? await saveToVault(this.app, bytes, fileName) : await saveExport(this.app, bytes, fileName);
+      const outcome = import_obsidian13.Platform.isMobile ? await saveToVault(this.app, bytes, fileName) : await saveExport(this.app, bytes, fileName);
       if (outcome.cancelled) {
-        new import_obsidian12.Notice("\u5DF2\u53D6\u6D88\u5BFC\u51FA");
+        new import_obsidian13.Notice("\u5DF2\u53D6\u6D88\u5BFC\u51FA");
         return;
       }
       const sizeMb = (bytes.byteLength / 1024 / 1024).toFixed(2);
       if (outcome.method === "vault") {
-        new import_obsidian12.Notice(`\u5DF2\u5BFC\u51FA\u5230 vault\uFF1A${outcome.path}\uFF08${sizeMb} MB\uFF09`, 8e3);
+        new import_obsidian13.Notice(`\u5DF2\u5BFC\u51FA\u5230 vault\uFF1A${outcome.path}\uFF08${sizeMb} MB\uFF09`, 8e3);
       } else {
-        new import_obsidian12.Notice(`\u5386\u53F2\u5DF2\u5BFC\u51FA\uFF08${fileName}\uFF0C${sizeMb} MB\uFF09`);
+        new import_obsidian13.Notice(`\u5386\u53F2\u5DF2\u5BFC\u51FA\uFF08${fileName}\uFF0C${sizeMb} MB\uFF09`);
       }
     } catch (err) {
       this.log("\u5BFC\u51FA\u5386\u53F2\u5931\u8D25", err);
       if (isUnsupportedBridgeError(err)) {
-        new import_obsidian12.Notice("\u5F53\u524D\u524D\u7AEF\u6865\u63A5\u4E0D\u652F\u6301\u5BFC\u51FA\uFF08\u8BF7\u66F4\u65B0\u524D\u7AEF www \u540E\u91CD\u8BD5\uFF09\u3002", 6e3);
+        new import_obsidian13.Notice("\u5F53\u524D\u524D\u7AEF\u6865\u63A5\u4E0D\u652F\u6301\u5BFC\u51FA\uFF08\u8BF7\u66F4\u65B0\u524D\u7AEF www \u540E\u91CD\u8BD5\uFF09\u3002", 6e3);
       } else {
-        new import_obsidian12.Notice("\u5BFC\u51FA\u5931\u8D25\uFF1A" + describeError(err));
+        new import_obsidian13.Notice("\u5BFC\u51FA\u5931\u8D25\uFF1A" + describeError(err));
       }
     }
   }
@@ -9113,15 +9211,15 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
     if (!file) return;
     const confirmed = await this.confirmImport(file.name);
     if (!confirmed) {
-      new import_obsidian12.Notice("\u5DF2\u53D6\u6D88\u5BFC\u5165");
+      new import_obsidian13.Notice("\u5DF2\u53D6\u6D88\u5BFC\u5165");
       return;
     }
     await this.activateChatView();
-    new import_obsidian12.Notice(`\u6B63\u5728\u5BFC\u5165\u300C${file.name}\u300D\uFF0C\u8BF7\u7A0D\u5019\u2026`);
+    new import_obsidian13.Notice(`\u6B63\u5728\u5BFC\u5165\u300C${file.name}\u300D\uFF0C\u8BF7\u7A0D\u5019\u2026`);
     try {
       const base64 = await readFileAsBase64(file);
       const count = await this.importHistoryData({ base64, fileName: file.name });
-      new import_obsidian12.Notice(
+      new import_obsidian13.Notice(
         count > 0 ? `\u5BFC\u5165\u6210\u529F\uFF1A\u5408\u5E76 ${count} \u4E2A\u4F1A\u8BDD\u3002\u6B63\u5728\u5237\u65B0\u4F1A\u8BDD\u5217\u8868\u2026` : "\u5BFC\u5165\u5B8C\u6210\uFF08\u5F52\u6863\u5185\u6CA1\u6709\u65B0\u4F1A\u8BDD\uFF09\u3002",
         6e3
       );
@@ -9129,9 +9227,9 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
     } catch (err) {
       this.log("\u5BFC\u5165\u5386\u53F2\u5931\u8D25", err);
       if (isUnsupportedBridgeError(err)) {
-        new import_obsidian12.Notice("\u5F53\u524D\u524D\u7AEF\u6865\u63A5\u4E0D\u652F\u6301\u5BFC\u5165\uFF08\u8BF7\u66F4\u65B0\u524D\u7AEF www \u540E\u91CD\u8BD5\uFF09\u3002", 6e3);
+        new import_obsidian13.Notice("\u5F53\u524D\u524D\u7AEF\u6865\u63A5\u4E0D\u652F\u6301\u5BFC\u5165\uFF08\u8BF7\u66F4\u65B0\u524D\u7AEF www \u540E\u91CD\u8BD5\uFF09\u3002", 6e3);
       } else {
-        new import_obsidian12.Notice("\u5BFC\u5165\u5931\u8D25\uFF1A" + describeError(err), 8e3);
+        new import_obsidian13.Notice("\u5BFC\u5165\u5931\u8D25\uFF1A" + describeError(err), 8e3);
       }
     }
   }
@@ -9163,7 +9261,7 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
   /** 旁路智能体当前状态（设置页展示） */
   getAgentStatus() {
     if (!this.settings.workerEnabled) return "\u672A\u542F\u7528\uFF08\u603B\u5F00\u5173\u5173\u95ED\uFF09";
-    if (!import_obsidian12.Platform.isDesktopApp) return "\u672A\u542F\u7528\uFF08\u79FB\u52A8\u7AEF\u6682\u4E0D\u652F\u6301\u65C1\u8DEF\u667A\u80FD\u4F53\uFF09";
+    if (!import_obsidian13.Platform.isDesktopApp) return "\u672A\u542F\u7528\uFF08\u79FB\u52A8\u7AEF\u6682\u4E0D\u652F\u6301\u65C1\u8DEF\u667A\u80FD\u4F53\uFF09";
     if (this.settings.apiKey.trim().length === 0) return "\u672A\u542F\u7528\uFF08\u7F3A\u5C11 API Key\uFF0C\u8BF7\u5728\u300C\u63A5\u53E3\u300D\u91CC\u586B\u5199\uFF09";
     if (!this.agentRuntime) return "\u521D\u59CB\u5316\u5931\u8D25\uFF08\u8BE6\u89C1\u5F00\u53D1\u8005\u63A7\u5236\u53F0 [my-chat][agent]\uFF09";
     return `\u5DF2\u542F\u7528\uFF08\u5206\u7C7B\u5668\uFF1A${this.settings.classifierModel}\uFF0CWorker\uFF1A${this.settings.workerModel}\uFF09`;
@@ -9186,10 +9284,10 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
       );
       this.log("[agent] \u6D4B\u8BD5\u7B14\u8BB0\u5DE5\u5177 search_notes \u7ED3\u679C\uFF1A", outcome);
       const preview = outcome.ok ? JSON.stringify(outcome.result).slice(0, 600) : String((_a = outcome.error) != null ? _a : "\u672A\u77E5\u9519\u8BEF");
-      new import_obsidian12.Notice(outcome.ok ? `\u7B14\u8BB0\u5DE5\u5177\u6D4B\u8BD5\u6210\u529F\uFF1A${preview}` : `\u7B14\u8BB0\u5DE5\u5177\u6D4B\u8BD5\u5931\u8D25\uFF1A${preview}`, 1e4);
+      new import_obsidian13.Notice(outcome.ok ? `\u7B14\u8BB0\u5DE5\u5177\u6D4B\u8BD5\u6210\u529F\uFF1A${preview}` : `\u7B14\u8BB0\u5DE5\u5177\u6D4B\u8BD5\u5931\u8D25\uFF1A${preview}`, 1e4);
     } catch (err) {
       console.warn("[my-chat][agent] \u6D4B\u8BD5\u7B14\u8BB0\u5DE5\u5177\u5931\u8D25", err);
-      new import_obsidian12.Notice("\u7B14\u8BB0\u5DE5\u5177\u6D4B\u8BD5\u5931\u8D25\uFF1A" + describeError(err), 8e3);
+      new import_obsidian13.Notice("\u7B14\u8BB0\u5DE5\u5177\u6D4B\u8BD5\u5931\u8D25\uFF1A" + describeError(err), 8e3);
     }
   }
   /** 组装并启动旁路智能体；未启用 / 失败时返回且不影响聊天 */
@@ -9199,7 +9297,7 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
       const runtime = createAgentRuntime({
         settings: this.settings,
         bridge: this.bridge,
-        platformDesktop: import_obsidian12.Platform.isDesktopApp,
+        platformDesktop: import_obsidian13.Platform.isDesktopApp,
         createAdapters: () => createAgentAdapters({
           app: this.app,
           apiKey: () => this.settings.apiKey,
@@ -9263,7 +9361,7 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
     return buildDiagnostics({
       pluginVersion: this.manifest.version,
       obsidianVersion: appVersion,
-      platform: import_obsidian12.Platform.isDesktopApp ? "\u684C\u9762\u7AEF" : "\u79FB\u52A8\u7AEF",
+      platform: import_obsidian13.Platform.isDesktopApp ? "\u684C\u9762\u7AEF" : "\u79FB\u52A8\u7AEF",
       asset: ((_b = this.assetProvider) == null ? void 0 : _b.isMobile) ? `\u79FB\u52A8\u7AEF\u5355\u6587\u4EF6 blob\uFF08www-single/index.html\uFF0C\u5DF2\u7F13\u5B58\uFF1A${this.assetProvider.cachedBlobUrl ? "\u662F" : "\u5426"}\uFF09` : "\u684C\u9762\u7AEF\u672C\u5730 http \u670D\u52A1",
       theme: ((_c = this.theme) == null ? void 0 : _c.dark) ? "\u6DF1\u8272" : "\u6D45\u8272",
       fontSize: (_e = (_d = this.theme) == null ? void 0 : _d.fontSize) != null ? _e : 16,
@@ -9292,7 +9390,7 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
     }
     const leaf = workspace.getLeftLeaf(false);
     if (!leaf) {
-      new import_obsidian12.Notice(`\u65E0\u6CD5\u6253\u5F00${label}\uFF08\u5DE6\u4FA7\u680F\u4E0D\u53EF\u7528\uFF09`);
+      new import_obsidian13.Notice(`\u65E0\u6CD5\u6253\u5F00${label}\uFF08\u5DE6\u4FA7\u680F\u4E0D\u53EF\u7528\uFF09`);
       return;
     }
     await leaf.setViewState({ type: viewType, active: false });
@@ -9308,7 +9406,7 @@ var MyChatPlugin = class extends import_obsidian12.Plugin {
     return parts.join("\uFF0C");
   }
 };
-var ImportHistoryModal = class extends import_obsidian12.Modal {
+var ImportHistoryModal = class extends import_obsidian13.Modal {
   constructor(app, fileName, finish) {
     super(app);
     this.fileName = fileName;

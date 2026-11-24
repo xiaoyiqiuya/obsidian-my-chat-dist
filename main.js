@@ -7412,6 +7412,15 @@ var KeyboardInsetController = class {
     if (!frame) return;
     const paneHeight = this.options.getPaneHeight() || window.innerHeight;
     frame.style.height = plan.shrinkFrame && plan.inset > 0 ? `calc(100% - ${plan.inset}px)` : "100%";
+    window.requestAnimationFrame(() => {
+      const target = this.options.getFrame();
+      if (!target) return;
+      const measured = target.getBoundingClientRect().height;
+      if (measured < 10) {
+        const fallback = Math.max(120, Math.round(paneHeight - (plan.inset > 0 ? plan.inset : 0)));
+        target.style.height = `${fallback}px`;
+      }
+    });
     if (plan.inset > 0 || this.inputFocused) {
       this.resetHostScroll();
     }
@@ -7483,7 +7492,7 @@ function classOf(el) {
   return `${el.tagName}.${cls.split(/\s+/).filter(Boolean).slice(0, 2).join(".")}`.slice(0, 60);
 }
 function collectLayout(frame, contentEl, state) {
-  var _a, _b, _c;
+  var _a, _b, _c, _d;
   const viewport = window.visualViewport;
   const scrollAncestors = [];
   let node = contentEl;
@@ -7512,6 +7521,11 @@ function collectLayout(frame, contentEl, state) {
     frameRect: rectOf(frame),
     contentRect: rectOf(contentEl),
     frameStyleHeight: frame ? frame.style.height : "",
+    frameComputedHeight: frame ? getComputedStyle(frame).height : "",
+    frameParentRect: rectOf((_d = frame == null ? void 0 : frame.parentElement) != null ? _d : null),
+    frameParentClass: (frame == null ? void 0 : frame.parentElement) ? classOf(frame.parentElement) : "",
+    iframeCount: document.querySelectorAll("iframe.my-chat-frame").length,
+    iframeVisible: Array.from(document.querySelectorAll("iframe.my-chat-frame")).filter((el) => el.getBoundingClientRect().height > 10).length,
     scrollAncestors,
     inset: state.inset,
     focused: state.focused,
@@ -7812,11 +7826,14 @@ ${error.toDiagnostic()}`;
     }
     const frameRect = snapshot.frameRect;
     const contentRect = snapshot.contentRect;
+    const parentRect = snapshot.frameParentRect;
     const ancestors = snapshot.scrollAncestors.filter((item) => item.scrollTop !== 0).map((item) => `${item.cls}:${item.scrollTop}`).slice(0, 2).join(" ");
     const lines = [
       `in=${snapshot.innerHeight} vv=${snapshot.vvHeight} off=${snapshot.vvOffsetTop}`,
       `sy=${snapshot.scrollY} ds=${snapshot.docScroll} bs=${snapshot.bodyScroll}`,
       `frame=${frameRect ? frameRect.top + "/" + frameRect.height : "-"} box=${contentRect ? contentRect.top + "/" + contentRect.height : "-"}`,
+      `par=${snapshot.frameParentClass}:${parentRect ? parentRect.top + "/" + parentRect.height : "-"}`,
+      `style=${snapshot.frameStyleHeight || "-"} css=${snapshot.frameComputedHeight} n=${snapshot.iframeCount}/${snapshot.iframeVisible}`,
       `inset=${snapshot.inset} f=${snapshot.focused ? 1 : 0} ${snapshot.mode}`
     ];
     if (ancestors) lines.push(`anc ${ancestors}`);

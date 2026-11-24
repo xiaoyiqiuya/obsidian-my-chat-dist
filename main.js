@@ -7293,7 +7293,7 @@ var KeyboardInsetController = class {
     this.options = options;
   }
   attach() {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e, _f, _g;
     if (this.attached || typeof window === "undefined") return;
     this.attached = true;
     this.baselineInner = window.innerHeight;
@@ -7341,6 +7341,9 @@ var KeyboardInsetController = class {
       }
     });
     if (unsubscribe) this.cleanup.push(unsubscribe);
+    const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => this.schedule()) : null;
+    resizeObserver == null ? void 0 : resizeObserver.observe((_g = (_f = (_e = this.options).getContentEl) == null ? void 0 : _f.call(_e)) != null ? _g : document.body);
+    if (resizeObserver) this.cleanup.push(() => resizeObserver.disconnect());
     const onHostScroll = () => {
       if (this.inputFocused) this.resetHostScroll();
     };
@@ -7411,16 +7414,13 @@ var KeyboardInsetController = class {
     const frame = this.options.getFrame();
     if (!frame) return;
     const paneHeight = this.options.getPaneHeight() || window.innerHeight;
-    frame.style.height = plan.shrinkFrame && plan.inset > 0 ? `calc(100% - ${plan.inset}px)` : "100%";
-    window.requestAnimationFrame(() => {
-      const target = this.options.getFrame();
-      if (!target) return;
-      const measured = target.getBoundingClientRect().height;
-      if (measured < 10) {
-        const fallback = Math.max(120, Math.round(paneHeight - (plan.inset > 0 ? plan.inset : 0)));
-        target.style.height = `${fallback}px`;
-      }
-    });
+    const inset = plan.shrinkFrame && plan.inset > 0 ? plan.inset : 0;
+    const heightPx = Math.max(120, Math.round(paneHeight - inset));
+    frame.style.display = "block";
+    frame.style.width = "100%";
+    frame.style.height = `${heightPx}px`;
+    frame.style.minHeight = "0";
+    frame.style.flex = "0 0 auto";
     if (plan.inset > 0 || this.inputFocused) {
       this.resetHostScroll();
     }
@@ -7781,6 +7781,7 @@ ${error.toDiagnostic()}`;
     const controller = new KeyboardInsetController({
       getFrame: () => this.frame,
       getPaneHeight: () => this.contentEl.clientHeight || window.innerHeight,
+      getContentEl: () => this.contentEl,
       getPreference: () => this.host.getKeyboardInset(),
       subscribeBridgeEvents: (listener) => this.host.bridge.onEvent(listener),
       onPlan: (plan, focused) => this.onKeyboardPlan(plan.inset, focused)

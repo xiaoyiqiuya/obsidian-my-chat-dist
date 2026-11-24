@@ -7225,6 +7225,19 @@ function readCssKeyboardHeight() {
   const value = Number.parseFloat(raw);
   return Number.isFinite(value) ? Math.max(0, value) : 0;
 }
+function estimateKeyboardHeight(innerHeight, innerWidth) {
+  const landscape = innerWidth > innerHeight;
+  const ratio = landscape ? 0.52 : 0.35;
+  if (!Number.isFinite(innerHeight) || innerHeight <= 0) return 0;
+  return Math.max(260, Math.min(520, Math.round(innerHeight * ratio)));
+}
+function estimateInsetByGeometry(input) {
+  const keyboard = estimateKeyboardHeight(input.innerHeight, input.innerWidth);
+  if (keyboard <= 0) return 0;
+  const visibleBottom = input.innerHeight - keyboard;
+  const paneBottom = input.paneTop + input.paneHeight;
+  return Math.max(0, Math.round(paneBottom - visibleBottom));
+}
 function computeKeyboardPlan(input) {
   const { preference, focused } = input;
   const paneHeight = Number.isFinite(input.paneHeight) ? Math.max(0, input.paneHeight) : 0;
@@ -7245,10 +7258,12 @@ function computeKeyboardPlan(input) {
   } else if (preference.mode === "off") {
     inset = 0;
   } else if (preference.mode === "estimate") {
-    const estimate = estimateKeyboardInset(input.innerHeight, paneHeight);
-    const paneShrink = Math.max(0, input.innerHeight - paneHeight);
-    const systemHandled = estimate > 0 && paneShrink >= estimate * 0.8;
-    inset = focused && !systemHandled ? estimate : 0;
+    inset = focused ? estimateInsetByGeometry({
+      innerHeight: input.innerHeight,
+      innerWidth: Number.isFinite(input.innerWidth) ? input.innerWidth : input.innerHeight,
+      paneTop: Number.isFinite(input.paneTop) ? input.paneTop : 0,
+      paneHeight
+    }) : 0;
     shrinkFrame = true;
     notifyFrame = inset;
   } else {
@@ -7399,6 +7414,15 @@ var KeyboardInsetController = class {
       preference: this.options.getPreference(),
       focused: this.inputFocused,
       innerHeight: window.innerHeight,
+      innerWidth: window.innerWidth,
+      paneTop: (() => {
+        var _a, _b;
+        const el = (_b = (_a = this.options).getContentEl) == null ? void 0 : _b.call(_a);
+        if (!el) return 0;
+        const rect = el.getBoundingClientRect();
+        const paddingTop = Number.parseFloat(getComputedStyle(el).paddingTop) || 0;
+        return rect.top + el.clientTop + paddingTop;
+      })(),
       paneHeight,
       visualHeight: viewport ? viewport.height : window.innerHeight,
       visualOffsetTop: viewport ? viewport.offsetTop : 0,

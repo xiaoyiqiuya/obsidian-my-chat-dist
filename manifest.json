@@ -1,7 +1,7 @@
 {
   "id": "obsidian-my-chat",
   "name": "My Chat",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "minAppVersion": "1.4.0",
   "description": "在侧栏里嵌入 My Chat 的完整对话界面（桌面端本地静态服务 + 官方前端 + 会话桥接）。",
   "author": "My Chat",

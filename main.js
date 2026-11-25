@@ -7227,17 +7227,23 @@ function readCssKeyboardHeight() {
   const value = Number.parseFloat(raw);
   return Number.isFinite(value) ? Math.max(0, value) : 0;
 }
-function estimateKeyboardHeight(innerHeight, innerWidth) {
-  const landscape = innerWidth > innerHeight;
+function estimateKeyboardHeight(innerHeight, innerWidth, screenWidth, screenHeight) {
+  const screenLandscape = Number.isFinite(screenWidth) && Number.isFinite(screenHeight) && screenWidth > screenHeight;
+  const landscape = screenLandscape || innerWidth > innerHeight;
   const ratio = landscape ? 0.52 : 0.35;
   if (!Number.isFinite(innerHeight) || innerHeight <= 0) return 0;
   return Math.max(260, Math.min(520, Math.round(innerHeight * ratio)));
 }
 function estimateInsetByGeometry(input) {
-  const keyboard = estimateKeyboardHeight(input.innerHeight, input.innerWidth);
+  const keyboard = estimateKeyboardHeight(
+    input.innerHeight,
+    input.innerWidth,
+    input.screenWidth,
+    input.screenHeight
+  );
   if (keyboard <= 0) return 0;
   const visibleBottom = input.innerHeight - keyboard;
-  const paneBottom = input.paneTop + input.paneHeight;
+  const paneBottom = Number.isFinite(input.paneBottom) && input.paneBottom > 0 ? input.paneBottom : input.paneTop + input.paneHeight;
   return Math.max(0, Math.round(paneBottom - visibleBottom));
 }
 function computeKeyboardPlan(input) {
@@ -7264,7 +7270,10 @@ function computeKeyboardPlan(input) {
       innerHeight: input.innerHeight,
       innerWidth: Number.isFinite(input.innerWidth) ? input.innerWidth : input.innerHeight,
       paneTop: Number.isFinite(input.paneTop) ? input.paneTop : 0,
-      paneHeight
+      paneBottom: input.paneBottom,
+      paneHeight,
+      screenWidth: input.screenWidth,
+      screenHeight: input.screenHeight
     }) : 0;
     shrinkFrame = true;
     notifyFrame = inset;
@@ -7282,7 +7291,15 @@ function computeKeyboardPlan(input) {
   if (!shrinkFrame) {
     inset = 0;
   }
-  return { kb, shrink, inset, shrinkFrame, notifyFrame };
+  const keyboardEstimate = estimateKeyboardHeight(
+    input.innerHeight,
+    Number.isFinite(input.innerWidth) ? input.innerWidth : input.innerHeight,
+    input.screenWidth,
+    input.screenHeight
+  );
+  const visibleBottom = input.innerHeight - keyboardEstimate;
+  const paneBottom = Number.isFinite(input.paneBottom) && input.paneBottom > 0 ? input.paneBottom : (Number.isFinite(input.paneTop) ? input.paneTop : 0) + paneHeight;
+  return { kb, shrink, inset, shrinkFrame, notifyFrame, keyboardEstimate, paneBottom, visibleBottom };
 }
 var keyboardSamples = [];
 function recordKeyboardSample(sample) {
@@ -7420,21 +7437,23 @@ var KeyboardInsetController = class {
     return Math.max(0, el.clientHeight - paddingTop - paddingBottom);
   }
   computePlan() {
+    var _a, _b, _c, _d, _e, _f, _g;
     const paneHeight = this.contentBoxHeight();
     const viewport = window.visualViewport;
+    const contentEl = (_c = (_b = (_a = this.options).getContentEl) == null ? void 0 : _b.call(_a)) != null ? _c : null;
+    const contentRect = (_d = contentEl == null ? void 0 : contentEl.getBoundingClientRect()) != null ? _d : null;
+    const css = contentEl ? getComputedStyle(contentEl) : null;
+    const paddingBottom = css ? Number.parseFloat(css.paddingBottom) || 0 : 0;
+    const paddingTop = css ? Number.parseFloat(css.paddingTop) || 0 : 0;
     return computeKeyboardPlan({
       preference: this.options.getPreference(),
       focused: this.inputFocused,
       innerHeight: window.innerHeight,
       innerWidth: window.innerWidth,
-      paneTop: (() => {
-        var _a, _b;
-        const el = (_b = (_a = this.options).getContentEl) == null ? void 0 : _b.call(_a);
-        if (!el) return 0;
-        const rect = el.getBoundingClientRect();
-        const paddingTop = Number.parseFloat(getComputedStyle(el).paddingTop) || 0;
-        return rect.top + el.clientTop + paddingTop;
-      })(),
+      screenWidth: (_e = window.screen) == null ? void 0 : _e.width,
+      screenHeight: (_f = window.screen) == null ? void 0 : _f.height,
+      paneTop: contentRect ? contentRect.top + ((_g = contentEl == null ? void 0 : contentEl.clientTop) != null ? _g : 0) + paddingTop : 0,
+      paneBottom: contentRect ? contentRect.bottom - paddingBottom : void 0,
       paneHeight,
       visualHeight: viewport ? viewport.height : window.innerHeight,
       visualOffsetTop: viewport ? viewport.offsetTop : 0,
@@ -7829,7 +7848,7 @@ ${error.toDiagnostic()}`;
         return preference;
       },
       subscribeBridgeEvents: (listener) => this.host.bridge.onEvent(listener),
-      onPlan: (plan, focused) => this.onKeyboardPlan(plan.inset, focused)
+      onPlan: (plan, focused) => this.onKeyboardPlan(plan, focused)
     });
     controller.attach();
     this.keyboard = controller;
@@ -7838,9 +7857,12 @@ ${error.toDiagnostic()}`;
    * 移动端诊断角标 + 远程上报（iPad 无开发者工具时的现场取证）。
    * 角标显示视口/滚动/iframe 几何/避让状态；同时把同一份快照 POST 到开发机。
    */
-  onKeyboardPlan(inset, focused) {
+  onKeyboardPlan(plan, focused) {
+    var _a, _b;
+    const inset = plan.inset;
     if (!import_obsidian10.Platform.isMobile) return;
     const mode = this.host.getKeyboardInset();
+    this.keyboardPlanDebug = `iw=${window.innerWidth} sw=${(_a = window.screen) == null ? void 0 : _a.width}x${(_b = window.screen) == null ? void 0 : _b.height} kbE=${plan.keyboardEstimate} pb=${plan.paneBottom} vb=${plan.visibleBottom}`;
     const snapshot = collectLayout(this.frame, this.contentEl, {
       inset,
       focused,
@@ -7880,7 +7902,8 @@ ${error.toDiagnostic()}`;
       `frame=${frameRect ? frameRect.top + "/" + frameRect.height : "-"} box=${contentRect ? contentRect.top + "/" + contentRect.height : "-"}`,
       `par=${snapshot.frameParentClass}:${parentRect ? parentRect.top + "/" + parentRect.height : "-"}`,
       `style=${snapshot.frameStyleHeight || "-"} css=${snapshot.frameComputedHeight} n=${snapshot.iframeCount}/${snapshot.iframeVisible}`,
-      `inset=${snapshot.inset} f=${snapshot.focused ? 1 : 0} ${snapshot.mode} v=${this.host.getPluginVersion()}`
+      `inset=${snapshot.inset} f=${snapshot.focused ? 1 : 0} ${snapshot.mode} v=${this.host.getPluginVersion()}`,
+      this.keyboardPlanDebug
     ];
     if (ancestors) lines.push(`anc ${ancestors}`);
     this.keyboardBadge.textContent = lines.join("\n");

@@ -7320,6 +7320,7 @@ var KeyboardInsetController = class {
   constructor(options) {
     this.attached = false;
     this.timers = /* @__PURE__ */ new Set();
+    this.settleTimer = 0;
     this.blurTimer = 0;
     this.inputFocused = false;
     this.capacitorHeight = 0;
@@ -7337,7 +7338,6 @@ var KeyboardInsetController = class {
     this.attached = true;
     this.baselineInner = window.innerHeight;
     this.baselinePane = this.options.getPaneHeight() || window.innerHeight;
-    this.baselinePaneBottom = this.measurePaneBottom();
     const viewport = window.visualViewport;
     const onResize = () => this.schedule();
     viewport == null ? void 0 : viewport.addEventListener("resize", onResize);
@@ -7396,6 +7396,8 @@ var KeyboardInsetController = class {
     if (!this.attached) return;
     this.attached = false;
     window.clearTimeout(this.blurTimer);
+    if (this.settleTimer) window.clearInterval(this.settleTimer);
+    this.settleTimer = 0;
     for (const id of this.timers) window.clearTimeout(id);
     this.timers.clear();
     (_a = this.observer) == null ? void 0 : _a.disconnect();
@@ -7404,10 +7406,25 @@ var KeyboardInsetController = class {
     const frame = this.options.getFrame();
     if (frame) frame.style.height = "100%";
   }
+  /** 聚焦期间持续校准（iOS 键盘/布局动画约 1-2 秒，单次定点采样容易踩到过渡值） */
+  startSettleWatcher() {
+    if (this.settleTimer) window.clearInterval(this.settleTimer);
+    let ticks = 0;
+    this.settleTimer = window.setInterval(() => {
+      ticks += 1;
+      if (!this.attached || ticks > 40) {
+        if (this.settleTimer) window.clearInterval(this.settleTimer);
+        this.settleTimer = 0;
+        return;
+      }
+      this.apply();
+    }, 250);
+  }
   /** iframe 内输入框聚焦状态变化 */
   setInputFocused(focused) {
     this.inputFocused = focused;
     this.schedule();
+    if (focused) this.startSettleWatcher();
   }
   isInputFocused() {
     return this.inputFocused;
@@ -7475,7 +7492,7 @@ var KeyboardInsetController = class {
     const el = (_b = (_a = this.options).getContentEl) == null ? void 0 : _b.call(_a);
     if (!el) return 0;
     const rect = el.getBoundingClientRect();
-    if (!rect || rect.height < 40) return 0;
+    if (!rect || rect.height < 120) return 0;
     const paddingBottom = Number.parseFloat(getComputedStyle(el).paddingBottom) || 0;
     return rect.bottom - paddingBottom;
   }

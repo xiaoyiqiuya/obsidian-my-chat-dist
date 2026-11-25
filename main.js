@@ -6766,6 +6766,7 @@ var DEFAULT_SETTINGS = {
   openSessionsOnStart: false,
   collapsedGroups: [],
   keyboardInsetMode: "estimate",
+  keyboardInsetAutoReset: false,
   keyboardInsetPx: 0
 };
 var AGENT_MODEL_OPTIONS = ["deepseek-chat", "deepseek-reasoner"];
@@ -6799,6 +6800,7 @@ function normalizeSettings(raw) {
     openSessionsOnStart: typeof source.openSessionsOnStart === "boolean" ? source.openSessionsOnStart : DEFAULT_SETTINGS.openSessionsOnStart,
     collapsedGroups,
     keyboardInsetMode: source.keyboardInsetMode === "off" ? "off" : source.keyboardInsetMode === "auto" ? "auto" : "estimate",
+    keyboardInsetAutoReset: source.keyboardInsetAutoReset === true,
     keyboardInsetPx: typeof source.keyboardInsetPx === "number" && Number.isFinite(source.keyboardInsetPx) ? Math.max(0, Math.min(600, Math.round(source.keyboardInsetPx))) : 0
   };
 }
@@ -7407,8 +7409,18 @@ var KeyboardInsetController = class {
     const plan = this.computePlan();
     this.applyPlan(plan);
   }
+  /** 内容盒高度：clientHeight 含内边距，减去内边距才和 paneTop（内容盒顶部）配套 */
+  contentBoxHeight() {
+    var _a, _b;
+    const el = (_b = (_a = this.options).getContentEl) == null ? void 0 : _b.call(_a);
+    if (!el) return this.options.getPaneHeight() || window.innerHeight;
+    const style = getComputedStyle(el);
+    const paddingTop = Number.parseFloat(style.paddingTop) || 0;
+    const paddingBottom = Number.parseFloat(style.paddingBottom) || 0;
+    return Math.max(0, el.clientHeight - paddingTop - paddingBottom);
+  }
   computePlan() {
-    const paneHeight = this.options.getPaneHeight() || window.innerHeight;
+    const paneHeight = this.contentBoxHeight();
     const viewport = window.visualViewport;
     return computeKeyboardPlan({
       preference: this.options.getPreference(),
@@ -8450,6 +8462,11 @@ var MyChatPlugin = class extends import_obsidian13.Plugin {
   }
   async onload() {
     await this.loadSettings();
+    if (this.settings.keyboardInsetMode === "off" && !this.settings.keyboardInsetAutoReset) {
+      this.settings.keyboardInsetMode = "estimate";
+      this.settings.keyboardInsetAutoReset = true;
+      await this.saveSettings();
+    }
     this.log("onload\uFF0C\u684C\u9762\u7AEF =", import_obsidian13.Platform.isDesktopApp, "\u8BBE\u7F6E =", {
       locale: this.settings.locale,
       themeMode: this.settings.themeMode,

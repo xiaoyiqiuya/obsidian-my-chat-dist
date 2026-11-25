@@ -375,6 +375,7 @@ __export(main_exports, {
   default: () => MyChatPlugin,
   defaultExportFileName: () => defaultExportFileName,
   detectNewEntities: () => detectNewEntities,
+  estimateKeyboardHeight: () => estimateKeyboardHeight,
   estimateKeyboardInset: () => estimateKeyboardInset,
   evaluateStorageHealth: () => evaluateStorageHealth,
   extractEntityNames: () => extractEntityNames,
@@ -7205,10 +7206,13 @@ function computeEffectiveInset(keyboardInset, layoutShrink) {
   if (shrink >= kb * 0.9) return 0;
   return Math.max(0, kb - shrink);
 }
-function estimateKeyboardInset(innerHeight, paneHeight) {
+function estimateKeyboardInset(innerHeight, paneHeight, innerWidth) {
   const basis = Number.isFinite(innerHeight) && innerHeight > 0 ? innerHeight : paneHeight;
   if (!Number.isFinite(basis) || basis <= 0) return 0;
-  const estimate = Math.max(260, Math.min(KEYBOARD_MAX, Math.round(basis * 0.35)));
+  const estimate = estimateKeyboardHeight(
+    basis,
+    Number.isFinite(innerWidth) ? innerWidth : basis
+  );
   if (Number.isFinite(paneHeight) && paneHeight > 0) {
     return Math.min(estimate, Math.max(0, Math.round(paneHeight - 240)));
   }
@@ -7234,18 +7238,6 @@ function estimateKeyboardHeight(innerHeight, innerWidth, screenWidth, screenHeig
   if (!Number.isFinite(innerHeight) || innerHeight <= 0) return 0;
   return Math.max(260, Math.min(520, Math.round(innerHeight * ratio)));
 }
-function estimateInsetByGeometry(input) {
-  const keyboard = estimateKeyboardHeight(
-    input.innerHeight,
-    input.innerWidth,
-    input.screenWidth,
-    input.screenHeight
-  );
-  if (keyboard <= 0) return 0;
-  const visibleBottom = input.innerHeight - keyboard;
-  const paneBottom = Number.isFinite(input.paneBottom) && input.paneBottom > 0 ? input.paneBottom : input.paneTop + input.paneHeight;
-  return Math.max(0, Math.round(paneBottom - visibleBottom));
-}
 function computeKeyboardPlan(input) {
   const { preference, focused } = input;
   const paneHeight = Number.isFinite(input.paneHeight) ? Math.max(0, input.paneHeight) : 0;
@@ -7260,21 +7252,21 @@ function computeKeyboardPlan(input) {
   let inset = 0;
   let shrinkFrame = false;
   let notifyFrame = 0;
+  let desiredHeight = 0;
   if (preference.px > 0) {
     inset = preference.px;
     shrinkFrame = true;
   } else if (preference.mode === "off") {
     inset = 0;
   } else if (preference.mode === "estimate") {
-    inset = focused ? estimateInsetByGeometry({
-      innerHeight: input.innerHeight,
-      innerWidth: Number.isFinite(input.innerWidth) ? input.innerWidth : input.innerHeight,
-      paneTop: Number.isFinite(input.paneTop) ? input.paneTop : 0,
-      paneBottom: input.paneBottom,
-      paneHeight,
-      screenWidth: input.screenWidth,
-      screenHeight: input.screenHeight
-    }) : 0;
+    const keyboardForGeometry = estimateKeyboardHeight(
+      input.innerHeight,
+      Number.isFinite(input.innerWidth) ? input.innerWidth : input.innerHeight,
+      input.screenWidth,
+      input.screenHeight
+    );
+    desiredHeight = focused && keyboardForGeometry > 0 && Number.isFinite(input.frameTop) ? Math.max(120, Math.round(input.innerHeight - keyboardForGeometry - input.frameTop)) : 0;
+    inset = focused ? Math.max(0, Math.round(paneHeight - desiredHeight)) : 0;
     shrinkFrame = true;
     notifyFrame = inset;
   } else {
@@ -7299,7 +7291,17 @@ function computeKeyboardPlan(input) {
   );
   const visibleBottom = input.innerHeight - keyboardEstimate;
   const paneBottom = Number.isFinite(input.paneBottom) && input.paneBottom > 0 ? input.paneBottom : (Number.isFinite(input.paneTop) ? input.paneTop : 0) + paneHeight;
-  return { kb, shrink, inset, shrinkFrame, notifyFrame, keyboardEstimate, paneBottom, visibleBottom };
+  return {
+    kb,
+    shrink,
+    inset,
+    shrinkFrame,
+    notifyFrame,
+    keyboardEstimate,
+    paneBottom,
+    visibleBottom,
+    desiredHeight
+  };
 }
 var keyboardSamples = [];
 function recordKeyboardSample(sample) {
@@ -7457,7 +7459,7 @@ var KeyboardInsetController = class {
     return Math.max(0, el.clientHeight - paddingTop - paddingBottom);
   }
   computePlan() {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     const paneHeight = this.contentBoxHeight();
     const viewport = window.visualViewport;
     const contentEl = (_c = (_b = (_a = this.options).getContentEl) == null ? void 0 : _b.call(_a)) != null ? _c : null;
@@ -7479,6 +7481,7 @@ var KeyboardInsetController = class {
         return bottom > 0 ? bottom : void 0;
       })(),
       paneHeight,
+      frameTop: (_h = this.options.getFrame()) == null ? void 0 : _h.getBoundingClientRect().top,
       visualHeight: viewport ? viewport.height : window.innerHeight,
       visualOffsetTop: viewport ? viewport.offsetTop : 0,
       cssKeyboardHeight: readCssKeyboardHeight(),
@@ -7507,7 +7510,7 @@ var KeyboardInsetController = class {
     if (!frame) return;
     const paneHeight = this.options.getPaneHeight() || window.innerHeight;
     const inset = plan.shrinkFrame && plan.inset > 0 ? plan.inset : 0;
-    const heightPx = Math.max(120, Math.round(paneHeight - inset));
+    const heightPx = plan.desiredHeight > 0 ? Math.max(120, Math.min(Math.round(paneHeight), plan.desiredHeight)) : Math.max(120, Math.round(paneHeight - inset));
     frame.style.display = "block";
     frame.style.width = "100%";
     frame.style.height = `${heightPx}px`;
@@ -7900,7 +7903,7 @@ ${error.toDiagnostic()}`;
     const inset = plan.inset;
     if (!import_obsidian10.Platform.isMobile) return;
     const mode = this.host.getKeyboardInset();
-    this.keyboardPlanDebug = `iw=${window.innerWidth} sw=${(_a = window.screen) == null ? void 0 : _a.width}x${(_b = window.screen) == null ? void 0 : _b.height} kbE=${plan.keyboardEstimate} pb=${plan.paneBottom} vb=${plan.visibleBottom}`;
+    this.keyboardPlanDebug = `iw=${window.innerWidth} sw=${(_a = window.screen) == null ? void 0 : _a.width}x${(_b = window.screen) == null ? void 0 : _b.height} kbE=${plan.keyboardEstimate} pb=${plan.paneBottom} vb=${plan.visibleBottom} dh=${plan.desiredHeight}`;
     const snapshot = collectLayout(this.frame, this.contentEl, {
       inset,
       focused,
@@ -9596,6 +9599,7 @@ var ImportHistoryModal = class extends import_obsidian13.Modal {
   decompressGzipBase64,
   defaultExportFileName,
   detectNewEntities,
+  estimateKeyboardHeight,
   estimateKeyboardInset,
   evaluateStorageHealth,
   extractEntityNames,

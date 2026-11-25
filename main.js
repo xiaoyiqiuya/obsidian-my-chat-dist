@@ -7457,8 +7457,8 @@ var KeyboardInsetController = class {
       screenHeight: (_f = window.screen) == null ? void 0 : _f.height,
       paneTop: contentRect ? contentRect.top + ((_g = contentEl == null ? void 0 : contentEl.clientTop) != null ? _g : 0) + paddingTop : 0,
       paneBottom: (() => {
-        const liveBottom = contentRect && contentRect.height >= 40 ? contentRect.bottom - paddingBottom : 0;
-        const bottom = Math.max(this.baselinePaneBottom, liveBottom);
+        const liveBottom = contentRect && contentRect.height >= 120 ? contentRect.bottom - paddingBottom : 0;
+        const bottom = liveBottom > 0 ? liveBottom : this.baselinePaneBottom;
         return bottom > 0 ? bottom : void 0;
       })(),
       paneHeight,

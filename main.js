@@ -7821,7 +7821,13 @@ ${error.toDiagnostic()}`;
       getFrame: () => this.frame,
       getPaneHeight: () => this.contentEl.clientHeight || window.innerHeight,
       getContentEl: () => this.contentEl,
-      getPreference: () => this.host.getKeyboardInset(),
+      getPreference: () => {
+        const preference = this.host.getKeyboardInset();
+        if (import_obsidian10.Platform.isMobile && preference.mode === "off" && preference.px === 0) {
+          return { mode: "estimate", px: 0 };
+        }
+        return preference;
+      },
       subscribeBridgeEvents: (listener) => this.host.bridge.onEvent(listener),
       onPlan: (plan, focused) => this.onKeyboardPlan(plan.inset, focused)
     });
@@ -7874,7 +7880,7 @@ ${error.toDiagnostic()}`;
       `frame=${frameRect ? frameRect.top + "/" + frameRect.height : "-"} box=${contentRect ? contentRect.top + "/" + contentRect.height : "-"}`,
       `par=${snapshot.frameParentClass}:${parentRect ? parentRect.top + "/" + parentRect.height : "-"}`,
       `style=${snapshot.frameStyleHeight || "-"} css=${snapshot.frameComputedHeight} n=${snapshot.iframeCount}/${snapshot.iframeVisible}`,
-      `inset=${snapshot.inset} f=${snapshot.focused ? 1 : 0} ${snapshot.mode}`
+      `inset=${snapshot.inset} f=${snapshot.focused ? 1 : 0} ${snapshot.mode} v=${this.host.getPluginVersion()}`
     ];
     if (ancestors) lines.push(`anc ${ancestors}`);
     this.keyboardBadge.textContent = lines.join("\n");
@@ -9407,6 +9413,9 @@ var MyChatPlugin = class extends import_obsidian13.Plugin {
   // ---------------------------------------------------------------------------
   // 诊断
   // ---------------------------------------------------------------------------
+  getPluginVersion() {
+    return this.manifest.version;
+  }
   getKeyboardInset() {
     var _a, _b;
     return {

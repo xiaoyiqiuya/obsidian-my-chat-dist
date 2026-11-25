@@ -6768,6 +6768,7 @@ var DEFAULT_SETTINGS = {
   collapsedGroups: [],
   keyboardInsetMode: "estimate",
   keyboardInsetAutoReset: false,
+  debugKeyboardOverlay: false,
   keyboardInsetPx: 0
 };
 var AGENT_MODEL_OPTIONS = ["deepseek-chat", "deepseek-reasoner"];
@@ -6802,6 +6803,7 @@ function normalizeSettings(raw) {
     collapsedGroups,
     keyboardInsetMode: source.keyboardInsetMode === "off" ? "off" : source.keyboardInsetMode === "auto" ? "auto" : "estimate",
     keyboardInsetAutoReset: source.keyboardInsetAutoReset === true,
+    debugKeyboardOverlay: source.debugKeyboardOverlay === true,
     keyboardInsetPx: typeof source.keyboardInsetPx === "number" && Number.isFinite(source.keyboardInsetPx) ? Math.max(0, Math.min(600, Math.round(source.keyboardInsetPx))) : 0
   };
 }
@@ -7027,6 +7029,12 @@ var MyChatSettingTab = class extends import_obsidian8.PluginSettingTab {
     ).addToggle((toggle) => {
       toggle.setValue(this.host.settings.openSessionsOnStart).onChange(async (value) => {
         await this.host.updateSettings({ openSessionsOnStart: value });
+      });
+    });
+    new import_obsidian8.Setting(parent).setName("\u663E\u793A\u952E\u76D8\u8C03\u8BD5\u89D2\u6807").setDesc("\u6392\u67E5 iPad \u952E\u76D8\u95EE\u9898\u65F6\uFF0C\u5728\u53F3\u4E0A\u89D2\u663E\u793A\u5B9E\u65F6\u5E03\u5C40\u6570\u636E\uFF08\u5E73\u65F6\u8BF7\u5173\u95ED\uFF09\u3002").addToggle((toggle) => {
+      toggle.setValue(this.host.settings.debugKeyboardOverlay === true).onChange(async (value) => {
+        await this.host.updateSettings({ debugKeyboardOverlay: value });
+        this.host.reloadChat();
       });
     });
     new import_obsidian8.Setting(parent).setName("\u8F6F\u952E\u76D8\u907F\u8BA9").setDesc(
@@ -7456,7 +7464,9 @@ var KeyboardInsetController = class {
     const style = getComputedStyle(el);
     const paddingTop = Number.parseFloat(style.paddingTop) || 0;
     const paddingBottom = Number.parseFloat(style.paddingBottom) || 0;
-    return Math.max(0, el.clientHeight - paddingTop - paddingBottom);
+    const contentHeight = el.clientHeight - paddingTop - paddingBottom;
+    if (contentHeight > 0) return contentHeight;
+    return this.options.getPaneHeight() || window.innerHeight;
   }
   computePlan() {
     var _a, _b, _c, _d, _e, _f, _g, _h;
@@ -7573,7 +7583,7 @@ var KeyboardInsetController = class {
 
 // src/debug/report.ts
 var import_obsidian9 = require("obsidian");
-var DEBUG_REPORT_URL = "http://192.168.192.120:47829/diag";
+var DEBUG_REPORT_URL = "";
 function rectOf(el) {
   if (!el) return null;
   const r = el.getBoundingClientRect();
@@ -9479,6 +9489,9 @@ var MyChatPlugin = class extends import_obsidian13.Plugin {
   // ---------------------------------------------------------------------------
   getPluginVersion() {
     return this.manifest.version;
+  }
+  getDebugKeyboardOverlay() {
+    return this.settings.debugKeyboardOverlay === true;
   }
   getKeyboardInset() {
     var _a, _b;

@@ -7314,7 +7314,7 @@ function getKeyboardSamples() {
   );
   return [header, ...rows].join("\n");
 }
-var REMEASURE_DELAYS = [60, 200, 500, 1e3, 1600];
+var REMEASURE_DELAYS = [60, 200, 500, 1e3, 1600, 2400, 3200];
 var BLUR_RESET_DELAY = 250;
 var KeyboardInsetController = class {
   constructor(options) {
@@ -7325,6 +7325,8 @@ var KeyboardInsetController = class {
     this.capacitorHeight = 0;
     this.baselineInner = 0;
     this.baselinePane = 0;
+    /** 键盘收起时记录的容器内容盒底边（视口坐标）：避免取到布局过渡中的瞬时值 */
+    this.baselinePaneBottom = 0;
     this.observer = null;
     this.cleanup = [];
     this.options = options;
@@ -7335,6 +7337,7 @@ var KeyboardInsetController = class {
     this.attached = true;
     this.baselineInner = window.innerHeight;
     this.baselinePane = this.options.getPaneHeight() || window.innerHeight;
+    this.baselinePaneBottom = this.measurePaneBottom();
     const viewport = window.visualViewport;
     const onResize = () => this.schedule();
     viewport == null ? void 0 : viewport.addEventListener("resize", onResize);
@@ -7453,7 +7456,11 @@ var KeyboardInsetController = class {
       screenWidth: (_e = window.screen) == null ? void 0 : _e.width,
       screenHeight: (_f = window.screen) == null ? void 0 : _f.height,
       paneTop: contentRect ? contentRect.top + ((_g = contentEl == null ? void 0 : contentEl.clientTop) != null ? _g : 0) + paddingTop : 0,
-      paneBottom: contentRect ? contentRect.bottom - paddingBottom : void 0,
+      paneBottom: (() => {
+        const liveBottom = contentRect && contentRect.height >= 40 ? contentRect.bottom - paddingBottom : 0;
+        const bottom = Math.max(this.baselinePaneBottom, liveBottom);
+        return bottom > 0 ? bottom : void 0;
+      })(),
       paneHeight,
       visualHeight: viewport ? viewport.height : window.innerHeight,
       visualOffsetTop: viewport ? viewport.offsetTop : 0,
@@ -7461,6 +7468,16 @@ var KeyboardInsetController = class {
       capacitorHeight: this.capacitorHeight,
       layoutShrink: this.measureLayoutShrink(paneHeight)
     });
+  }
+  /** 容器内容盒底边（视口坐标）：rect.bottom - paddingBottom */
+  measurePaneBottom() {
+    var _a, _b;
+    const el = (_b = (_a = this.options).getContentEl) == null ? void 0 : _b.call(_a);
+    if (!el) return 0;
+    const rect = el.getBoundingClientRect();
+    if (!rect || rect.height < 40) return 0;
+    const paddingBottom = Number.parseFloat(getComputedStyle(el).paddingBottom) || 0;
+    return rect.bottom - paddingBottom;
   }
   measureLayoutShrink(paneHeight) {
     const innerShrink = this.baselineInner - window.innerHeight;
@@ -7499,6 +7516,8 @@ var KeyboardInsetController = class {
     if (plan.inset === 0 && !this.inputFocused) {
       this.baselineInner = window.innerHeight;
       this.baselinePane = paneHeight;
+      const bottom = this.measurePaneBottom();
+      if (bottom > 0) this.baselinePaneBottom = bottom;
     }
   }
   /** 复位宿主 window 的滚动（iOS 键盘弹出时可能把整个页面滚走） */

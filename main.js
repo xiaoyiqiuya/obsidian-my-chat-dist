@@ -7628,6 +7628,8 @@ var MyChatView = class extends import_obsidian10.ItemView {
     this.keyboard = null;
     /** 移动端键盘避让诊断角标（截图排查用，不在桌面端显示） */
     this.keyboardBadge = null;
+    /** 最近一次避让决策的调试文本（角标显示） */
+    this.keyboardPlanDebug = "";
     /** 每次挂载 +1，异步回调回来时用它判断是否已过期 */
     this.generation = 0;
     this.host = host;

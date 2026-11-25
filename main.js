@@ -7912,6 +7912,10 @@ ${error.toDiagnostic()}`;
     var _a, _b;
     const inset = plan.inset;
     if (!import_obsidian10.Platform.isMobile) return;
+    if (!this.host.getDebugKeyboardOverlay()) {
+      this.removeKeyboardBadge();
+      return;
+    }
     const mode = this.host.getKeyboardInset();
     this.keyboardPlanDebug = `iw=${window.innerWidth} sw=${(_a = window.screen) == null ? void 0 : _a.width}x${(_b = window.screen) == null ? void 0 : _b.height} kbE=${plan.keyboardEstimate} pb=${plan.paneBottom} vb=${plan.visibleBottom} dh=${plan.desiredHeight}`;
     const snapshot = collectLayout(this.frame, this.contentEl, {
